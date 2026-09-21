@@ -7,6 +7,10 @@ from edge_ai.decision import Decision
 
 class HardwareBackend(ABC):
     @abstractmethod
+    def check_connection(self) -> None:
+        """Raise a useful error if the backend cannot reach its hardware."""
+
+    @abstractmethod
     def set_led(self, enabled: bool) -> None: ...
 
     @abstractmethod

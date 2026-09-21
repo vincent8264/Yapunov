@@ -10,6 +10,9 @@ dependencies = [
     "opencv-python>=4.10",
 ]
 
+[project.scripts]
+edge-ai = "edge_ai.cli:main"
+
 [dependency-groups]
 dev = ["pytest>=8.3"]
 

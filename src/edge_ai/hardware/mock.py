@@ -16,6 +16,9 @@ class MockHardware(HardwareBackend):
         if self.verbose:
             print(f"[MOCK] {message}")
 
+    def check_connection(self) -> None:
+        self._print("CONNECTION OK")
+
     def set_led(self, enabled: bool) -> None:
         self.led_enabled = enabled
         self._print(f"LED {'ON' if enabled else 'OFF'}")

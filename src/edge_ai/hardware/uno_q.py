@@ -12,7 +12,10 @@ from edge_ai.hardware.base import HardwareBackend
 
 
 class UnoQHardware(HardwareBackend):
-    def __init__(self) -> None:
+    def __init__(self, bridge: Any | None = None) -> None:
+        if bridge is not None:
+            self._bridge = bridge
+            return
         try:
             from arduino.app_utils import Bridge
         except ImportError as exc:
@@ -20,7 +23,12 @@ class UnoQHardware(HardwareBackend):
                 "UnoQHardware requires the Arduino App Lab runtime on an UNO Q. "
                 "Use MockHardware on Windows or macOS."
             ) from exc
-        self._bridge: Any = Bridge
+        self._bridge = Bridge
+
+    def check_connection(self) -> None:
+        response = self._bridge.call("health_check")
+        if response != "ok":
+            raise RuntimeError(f"UNO Q Bridge health check returned {response!r}")
 
     def set_led(self, enabled: bool) -> None:
         self._bridge.call("set_led", enabled)

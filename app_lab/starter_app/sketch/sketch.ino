@@ -9,6 +9,10 @@
 constexpr int PWM_PIN = 9;
 constexpr int SERVO_PIN = 10;
 
+String health_check() {
+  return String("ok");
+}
+
 void set_led(bool enabled) {
   // The built-in LED is active-low on the currently documented UNO Q example.
   digitalWrite(LED_BUILTIN, enabled ? LOW : HIGH);
@@ -37,6 +41,7 @@ void setup() {
 
   Bridge.begin();
   // provide_safe runs Arduino hardware APIs in the main loop context.
+  Bridge.provide_safe("health_check", health_check);
   Bridge.provide_safe("set_led", set_led);
   Bridge.provide_safe("set_pwm", set_pwm);
   Bridge.provide_safe("move_servo", move_servo);
