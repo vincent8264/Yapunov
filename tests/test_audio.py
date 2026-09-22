@@ -52,6 +52,19 @@ def test_wav_input_downmixes_stereo_pcm(tmp_path: Path) -> None:
     assert frame.samples[1] == pytest.approx(0.5)
 
 
+def test_random_simulated_audio_stays_within_requested_events() -> None:
+    events = ["smoke_alarm", "glass_break", "fall_thud"]
+    source = SimulatedSoundInput(events, seed=11, choose_randomly=True)
+    engine = SpectralSoundInferenceEngine()
+
+    labels = [
+        engine.predict(extract_audio_features(source.read())).label for _ in range(12)
+    ]
+
+    assert set(labels) <= set(events)
+    assert len(set(labels)) > 1
+
+
 def test_simulated_audio_exercises_all_demo_classes() -> None:
     events = ["background", "smoke_alarm", "glass_break", "fall_thud"]
     source = SimulatedSoundInput(events, loop=False)

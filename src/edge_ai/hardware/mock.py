@@ -2,6 +2,7 @@
 
 from edge_ai.decision import Decision
 from edge_ai.hardware.base import HardwareBackend
+from edge_ai.hardware.icons import render_icon
 
 
 class MockHardware(HardwareBackend):
@@ -41,6 +42,12 @@ class MockHardware(HardwareBackend):
         self.current_alert = event
         self.alert_history.append(event)
         self._print(f"DISPLAY: {event}")
+        try:
+            preview = render_icon(event)
+        except ValueError:
+            preview = None
+        if preview is not None:
+            self._print(preview)
         self.set_led(True)
 
     def clear_alert(self) -> None:

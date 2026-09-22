@@ -16,17 +16,13 @@ from edge_ai.hardware.mock import MockHardware
 from edge_ai.hardware.uno_q import UnoQHardware
 from edge_ai.inference.base import InferenceEngine, InferenceResult
 from edge_ai.inference.dummy import DummyInferenceEngine
-from edge_ai.inference.onnx import ONNXInferenceEngine
 from edge_ai.inference.spectral import SpectralSoundInferenceEngine
-from edge_ai.inference.yamnet import YAMNetInferenceEngine
 from edge_ai.inputs.audio import MicrophoneInput, SimulatedSoundInput, WavAudioInput
 from edge_ai.inputs.base import InputSource
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
-from edge_ai.inputs.webcam import WebcamInput
 from edge_ai.pipeline import Pipeline
 from edge_ai.notifications import AsyncNotifier, Notifier, NotifyingHardware, SMTPNotifier
 from edge_ai.preprocessing.audio import extract_audio_features, prepare_audio_waveform
-from edge_ai.preprocessing.image import preprocess_image
 from edge_ai.preprocessing.sensor import normalize_sensor
 from edge_ai.settings import (
     NotificationPreferences,
@@ -138,6 +134,8 @@ def _build_input(section: Mapping[str, Any], config_dir: Path) -> InputSource:
         camera_index = section.get("camera_index", 0)
         if isinstance(camera_index, bool) or not isinstance(camera_index, int):
             raise ConfigError("[input].camera_index must be an integer")
+        from edge_ai.inputs.webcam import WebcamInput
+
         return WebcamInput(camera_index=camera_index)
     if component_type == "wav":
         raw_paths = section.get("paths")
@@ -180,6 +178,7 @@ def _build_input(section: Mapping[str, Any], config_dir: Path) -> InputSource:
                 duration_seconds=_number(section, "duration_seconds", 1.0),
                 seed=_integer(section, "seed", 7),
                 loop=_boolean(section, "loop", True),
+                choose_randomly=_boolean(section, "random", False),
             )
         except ValueError as exc:
             raise ConfigError(f"invalid [input] configuration: {exc}") from exc
@@ -214,6 +213,8 @@ def _build_preprocessor(section: Mapping[str, Any]) -> Callable[[Any], Any]:
         normalize = section.get("normalize", True)
         if not isinstance(normalize, bool):
             raise ConfigError("[preprocessing].normalize must be a boolean")
+        from edge_ai.preprocessing.image import preprocess_image
+
         return partial(preprocess_image, size=(size[0], size[1]), normalize=normalize)
     if component_type in {"audio_waveform", "audio_features"}:
         sample_rate = _integer(section, "sample_rate", 16_000)
@@ -260,6 +261,8 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
                 "model output activation; otherwise add a model-specific output adapter"
             )
         model_path = (config_dir / model).resolve()
+        from edge_ai.inference.onnx import ONNXInferenceEngine
+
         try:
             return ONNXInferenceEngine(
                 model_path,
@@ -277,6 +280,8 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
         model = section.get("model")
         if not isinstance(model, str) or not model:
             raise ConfigError("[inference].model must be a non-empty path")
+        from edge_ai.inference.yamnet import YAMNetInferenceEngine
+
         try:
             return YAMNetInferenceEngine(
                 (config_dir / model).resolve(),
@@ -429,11 +434,32 @@ def _build_notifier(
     password_env = section.get("password_env")
     if password_env is not None and (not isinstance(password_env, str) or not password_env):
         raise ConfigError("[notifications].password_env must be a non-empty string")
-    if username is not None and password_env is None:
-        raise ConfigError("[notifications].password_env is required when username is set")
-    password = os.environ.get(password_env) if password_env is not None else None
-    if password_env is not None and password is None:
-        raise ConfigError(f"notification secret environment variable is not set: {password_env}")
+    password_file = section.get("password_file")
+    if password_file is not None and (not isinstance(password_file, str) or not password_file):
+        raise ConfigError("[notifications].password_file must be a non-empty path")
+    if password_env is not None and password_file is not None:
+        raise ConfigError("set only one of [notifications].password_env or password_file")
+    if username is not None and password_env is None and password_file is None:
+        raise ConfigError(
+            "[notifications].password_env or password_file is required when username is set"
+        )
+    password: str | None = None
+    if password_env is not None:
+        password = os.environ.get(password_env)
+        if password is None:
+            raise ConfigError(
+                f"notification secret environment variable is not set: {password_env}"
+            )
+    if password_file is not None:
+        secret_path = (config_dir / password_file).resolve()
+        try:
+            password = secret_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError as exc:
+            raise ConfigError(f"notification password file not found: {secret_path}") from exc
+        except OSError as exc:
+            raise ConfigError(f"could not read notification password file: {exc}") from exc
+        if not password:
+            raise ConfigError(f"notification password file is empty: {secret_path}")
     timeout_seconds = _number(section, "timeout_seconds", 5.0)
     if timeout_seconds <= 0.0:
         raise ConfigError("[notifications].timeout_seconds must be positive")

@@ -7,5 +7,7 @@ __pycache__/
 !models/README.md
 .DS_Store
 Thumbs.db
+/dist/
 /configs/private-live.toml
+/configs/private.live.toml
 /data/notification-settings.json

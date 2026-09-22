@@ -1,0 +1,36 @@
+# Board test: same random synthetic sounds as configs/sound-random.toml, with
+# the classified event drawn on the UNO Q matrix. Run from App Lab, or with
+# `edge-ai run` only on the board where the Bridge package is installed.
+[runtime]
+interval_seconds = 1.0
+
+[input]
+type = "simulated_sound"
+random = true
+events = ["background", "smoke_alarm", "glass_break", "fall_thud"]
+sample_rate = 16000
+duration_seconds = 1.0
+seed = 7
+
+[preprocessing]
+type = "audio_features"
+sample_rate = 16000
+duration_seconds = 1.0
+
+[inference]
+type = "spectral_demo"
+min_rms = 0.02
+
+[decision]
+type = "sound_events"
+thresholds = { smoke_alarm = 0.80, glass_break = 0.80, fall_thud = 0.80 }
+confirmations = 1
+hold_seconds = 2.0
+notification_cooldown_seconds = 60.0
+
+[hardware]
+type = "uno_q"
+
+[notifications]
+type = "none"
+device_name = "Demo sound monitor"

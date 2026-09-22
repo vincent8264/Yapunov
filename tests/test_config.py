@@ -23,6 +23,20 @@ def test_demo_config_builds_pipeline() -> None:
     assert isinstance(configured.pipeline.hardware, MockHardware)
 
 
+def test_uno_q_sound_config_requires_board_runtime() -> None:
+    with pytest.raises(RuntimeError, match="UnoQHardware requires"):
+        load_config(Path("configs/sound-uno-q.toml"))
+
+
+def test_random_sound_config_enables_random_input() -> None:
+    configured = load_config(Path("configs/sound-random.toml"))
+    source = configured.pipeline.input_source
+
+    assert isinstance(source, SimulatedSoundInput)
+    assert source.choose_randomly is True
+    assert isinstance(configured.pipeline.hardware, MockHardware)
+
+
 def test_sound_demo_config_builds_audio_pipeline() -> None:
     configured = load_config(Path("configs/sound-demo.toml"))
 
@@ -243,6 +257,67 @@ password_env = "TEST_SMTP_PASSWORD"
     assert configured.notifier.recipient == "family@example.com"
     assert configured.device_name == "Kitchen"
     assert str(configured.local_timezone) == "America/Los_Angeles"
+
+
+def test_password_file_supplies_smtp_secret(tmp_path: Path) -> None:
+    config = tmp_path / "board.toml"
+    config.write_text(
+        """
+[notifications]
+type = "smtp"
+host = "smtp.example.com"
+sender = "monitor@example.com"
+recipient = "family@example.com"
+username = "monitor@example.com"
+password_file = "smtp-password"
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "smtp-password").write_text("file-secret\n", encoding="utf-8")
+
+    configured = load_notification_config(config)
+
+    assert isinstance(configured.notifier, SMTPNotifier)
+    assert configured.notifier.password == "file-secret"
+
+
+def test_missing_password_file_is_rejected_at_startup(tmp_path: Path) -> None:
+    config = tmp_path / "board.toml"
+    config.write_text(
+        """
+[notifications]
+type = "smtp"
+host = "smtp.example.com"
+sender = "monitor@example.com"
+recipient = "family@example.com"
+username = "monitor@example.com"
+password_file = "missing-password"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="password file not found"):
+        load_notification_config(config)
+
+
+def test_password_env_and_file_are_mutually_exclusive(tmp_path: Path) -> None:
+    config = tmp_path / "board.toml"
+    config.write_text(
+        """
+[notifications]
+type = "smtp"
+host = "smtp.example.com"
+sender = "monitor@example.com"
+recipient = "family@example.com"
+username = "monitor@example.com"
+password_env = "TEST_SMTP_PASSWORD"
+password_file = "smtp-password"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="only one"):
+        load_notification_config(config)
 
 
 def test_disabled_saved_preferences_do_not_require_smtp_secret(tmp_path: Path) -> None:

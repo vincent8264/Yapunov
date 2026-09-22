@@ -50,6 +50,16 @@ This generates actual waveforms, extracts spectral features, classifies the thre
 signatures, and records the visual decisions. Its transparent spectral rules validate
 the complete pipeline; they are not a production safety model.
 
+Pick a different synthetic sound on every step and print the 8x8 icon the matrix
+would show:
+
+```bash
+uv run edge-ai run --config configs/sound-random.toml --max-steps 6
+```
+
+On the UNO Q, import the packaged app described under "Adding the UNO Q". It runs
+these same random sounds and sends each alert to the onboard matrix.
+
 For live YAMNet inference, first download the model once (the application does not
 download anything at runtime):
 
@@ -217,19 +227,45 @@ still be verified on the physical UNO Q before field use.
 
 ## Adding the UNO Q
 
-When the board arrives:
+App Lab deploys one app, not this repository. Build that app, then import the zip:
 
-1. Open and test `app_lab/starter_app` in Arduino App Lab.
-2. Verify the installed App Lab and Bridge API versions against the board image.
-3. Test the `show_alert` and `clear_alert` Bridge calls using the three included icons.
-4. Confirm the installed `Arduino_LED_Matrix` and Bridge versions on the board.
-5. Set `[hardware].type = "uno_q"` in a copy of the live sound config; the rest of the
-   pipeline stays unchanged.
+```bash
+uv run python scripts/package_app_lab.py
+```
 
-The sketch uses the documented onboard matrix library and no external pins. It still
-requires compilation and visual verification on the supplied UNO Q. External PWM and
-servo paths remain deliberately disabled.
+This writes `dist/private-sound-alerts.zip`. The archive root contains `app.yaml`,
+the sketch, and a Python bundle of the random-sound demo.
 
-The App Lab Python entrypoint cycles the three icons as a hardware smoke test. It is
-deliberately separate from classification so display/Bridge problems can be diagnosed
-without involving the microphone or model.
+In Arduino App Lab, with the UNO Q connected by USB-C and its first-time setup
+already finished:
+
+1. Open **My Apps**.
+2. Choose **Create new app**, then **Import App**.
+3. Import `dist/private-sound-alerts.zip`.
+4. Open the imported app and run it.
+
+App Lab compiles `sketch/sketch.ino` onto the board's microcontroller and starts
+`python/main.py` on the Linux side. Each loop synthesizes one random sound, classifies
+it locally, and calls `show_alert` so the onboard matrix draws that icon. The App Lab
+log shows lines such as `label=glass_break`. This build does not open the microphone,
+load YAMNet, or send email.
+
+To send email from the board as well, first confirm delivery from the laptop with
+`edge-ai test-notification`, then build the email variant:
+
+```bash
+export EDGE_AI_SMTP_PASSWORD='your-smtp-app-password'
+uv run python scripts/package_app_lab.py --notifications configs/private-live.toml
+```
+
+This writes `dist/private-sound-alerts-email.zip`. It copies the `[notifications]`
+settings into the board config and stores the password in `python/smtp-password`,
+because App Lab does not pass laptop environment variables to the board. That zip
+contains the secret: import it only on your own UNO Q and never upload it to the
+project page. The board must be on Wi-Fi with outbound SMTP allowed. Email runs in the
+background, so a failed send is logged and never blocks the matrix alert.
+
+The sketch uses the documented onboard matrix library and no external pins. Confirm
+the installed App Lab, Bridge, and `Arduino_LED_Matrix` versions on the board, and
+check that each icon is upright and centered. External PWM and servo paths remain
+deliberately disabled.

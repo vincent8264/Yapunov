@@ -1,1 +1,4 @@
-# Add the packaged edge_ai project and runtime dependencies when deploying to a real UNO Q.
+# The simulated board demo imports the bundled edge_ai package. NumPy runs the
+# audio features; tzdata lets email timestamps use the configured timezone.
+numpy>=2.1
+tzdata>=2025.2

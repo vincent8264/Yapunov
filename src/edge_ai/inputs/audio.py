@@ -202,6 +202,7 @@ class SimulatedSoundInput(InputSource):
         duration_seconds: float = 1.0,
         seed: int = 7,
         loop: bool = True,
+        choose_randomly: bool = False,
     ) -> None:
         if not events:
             raise ValueError("simulated sound input requires at least one event")
@@ -216,16 +217,20 @@ class SimulatedSoundInput(InputSource):
         self.sample_rate = sample_rate
         self.sample_count = round(sample_rate * duration_seconds)
         self.loop = loop
+        self.choose_randomly = choose_randomly
         self._index = 0
         self._random = random.Random(seed)
 
     def read(self) -> AudioFrame:
-        if self._index >= len(self.events):
-            if not self.loop:
-                raise RuntimeError("simulated sound input is exhausted")
-            self._index = 0
-        event = self.events[self._index]
-        self._index += 1
+        if self.choose_randomly:
+            event = self._random.choice(self.events)
+        else:
+            if self._index >= len(self.events):
+                if not self.loop:
+                    raise RuntimeError("simulated sound input is exhausted")
+                self._index = 0
+            event = self.events[self._index]
+            self._index += 1
         seed = self._random.randrange(0, 2**32)
         generator = np.random.default_rng(seed)
         time_axis = np.arange(self.sample_count, dtype=np.float32) / self.sample_rate

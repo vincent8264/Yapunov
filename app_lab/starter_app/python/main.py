@@ -1,28 +1,73 @@
-"""UNO Q matrix smoke test. Run only inside Arduino App Lab on the board.
+"""Classify random synthetic sounds and show the matching UNO Q matrix icon.
 
-The production sound pipeline runs from the ``edge-ai`` package. This small App Lab
-loop verifies Bridge and matrix behavior independently before enabling live audio.
+App Lab runs this file on the board. Each loop generates one seeded random
+sound, classifies it locally, and asks the sketch to draw that event. Raw
+samples stay in this process.
 """
 
+from __future__ import annotations
+
+import atexit
+import sys
 import time
+from pathlib import Path
 
-from arduino.app_utils import App, Bridge
 
-EVENTS = ("smoke_alarm", "glass_break", "fall_thud")
-event_index = 0
+def _bundle() -> tuple[Path, Path]:
+    """Return ``(import root, config path)`` for the board bundle or the repo."""
+    here = Path(__file__).resolve().parent
+    local_config = here / "sound-uno-q.toml"
+    if (here / "edge_ai").is_dir() and local_config.is_file():
+        return here, local_config
+    for parent in here.parents:
+        if (parent / "src" / "edge_ai").is_dir() and (
+            parent / "configs" / "sound-uno-q.toml"
+        ).is_file():
+            return parent / "src", parent / "configs" / "sound-uno-q.toml"
+    raise RuntimeError(
+        "The sound pipeline is not in this App Lab app. "
+        "Run scripts/package_app_lab.py and import the zip it writes."
+    )
+
+
+_IMPORT_ROOT, _CONFIG_PATH = _bundle()
+sys.path.insert(0, str(_IMPORT_ROOT))
+
+from arduino.app_utils import App  # noqa: E402
+
+from edge_ai.config import load_config  # noqa: E402
+
+_CONFIGURED = load_config(_CONFIG_PATH)
+_READY = False
+
+
+def _cleanup() -> None:
+    hardware = _CONFIGURED.pipeline.hardware
+    try:
+        hardware.shutdown()
+    finally:
+        close = getattr(_CONFIGURED.pipeline.input_source, "close", None)
+        if callable(close):
+            close()
 
 
 def loop() -> None:
-    global event_index
-    event = EVENTS[event_index]
-    response = Bridge.call("show_alert", event)
-    if response != "ok":
-        raise RuntimeError(f"matrix rejected {event!r}: {response!r}")
-    print(f"matrix event: {event}")
-    time.sleep(1.0)
-    Bridge.call("clear_alert")
-    time.sleep(0.25)
-    event_index = (event_index + 1) % len(EVENTS)
+    global _READY
+    if not _READY:
+        _CONFIGURED.pipeline.hardware.check_connection()
+        _READY = True
+    started = time.perf_counter()
+    result, decision = _CONFIGURED.pipeline.step()
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    print(
+        f"label={result.label} confidence={result.confidence:.3f} "
+        f"action={decision.action} event={decision.event or '-'} "
+        f"latency_ms={elapsed_ms:.1f}"
+    )
+    delay = _CONFIGURED.interval_seconds - (time.perf_counter() - started)
+    if delay > 0.0:
+        time.sleep(delay)
 
 
+atexit.register(_cleanup)
 App.run(user_loop=loop)
