@@ -261,8 +261,9 @@ uv run python scripts/package_app_lab.py --mode yamnet-test
 
 Import `dist/private-sound-alerts-yamnet-test.zip` in App Lab. This larger package
 installs ONNX Runtime and runs four bundled WAV files through the real YAMNet model.
-It should recognize the synthetic alarm and glass fixtures; the deliberately simple
-fall-like fixture currently resolves to background/silence. This is a model-loading
+It should recognize the synthetic alarm and glass fixtures. The fall-like fixture is
+classified as `fall_thud`, but at about 0.10, below the 0.20 alert threshold, so it
+does not raise an alert. This is a model-loading
 and inference smoke test, not accuracy evidence, and it does not open a microphone.
 
 In Arduino App Lab, with the UNO Q connected by USB-C and its first-time setup
@@ -278,6 +279,29 @@ App Lab compiles `sketch/sketch.ino` onto the board's microcontroller and starts
 it locally, and calls `show_alert` so the onboard matrix draws that icon. The App Lab
 log shows lines such as `label=glass_break`. This build does not open the microphone,
 load YAMNet, or send email.
+
+For real sound classification on the board, download `models/yamnet.onnx` as
+described above and package the live configuration:
+
+```bash
+uv run python scripts/package_app_lab.py --config configs/sound-uno-q-live.toml
+```
+
+This writes `dist/private-sound-alerts-live.zip` (about 16 MB), which bundles YAMNet
+and its class map and adds `onnxruntime` to the board's requirements. The app reads
+the first USB microphone through App Lab's ALSA microphone peripheral. The UNO Q's
+single USB-C port must then carry a powered USB-C hub with the microphone attached,
+so run App Lab in Network Mode with the board on Wi-Fi. The first start also needs
+internet to install `onnxruntime`. The log prints YAMNet's top AudioSet label on each
+line (`model_label=Alarm`), which helps tune the thresholds in the live config.
+
+To exercise the same YAMNet, decision, matrix, and email chain without a microphone,
+package `configs/sound-uno-q-yamnet-sim.toml` instead. It feeds random synthetic
+smoke-alarm, glass, thud, and background clips into the real model and writes
+`dist/private-sound-alerts-yamnet-sim.zip`. The synthetic clips are not recordings:
+on the laptop YAMNet recognized the alarm in 30 of 30 clips, glass in 27 of 30, and
+the thud in 26 of 30, but individual glass and thud scores sometimes fall below the
+0.20 threshold, so not every generated clip raises an alert.
 
 To send email from the board as well, first confirm delivery from the laptop with
 `edge-ai test-notification`, then build the email variant:

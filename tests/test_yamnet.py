@@ -103,6 +103,23 @@ def test_yamnet_returns_background_below_target_floor(tmp_path: Path) -> None:
     assert result.model_confidence == pytest.approx(0.04)
 
 
+_REAL_MODEL = Path(__file__).resolve().parents[1] / "models" / "yamnet.onnx"
+
+
+@pytest.mark.skipif(not _REAL_MODEL.is_file(), reason="models/yamnet.onnx is not installed")
+@pytest.mark.parametrize("event", ["background", "smoke_alarm", "glass_break", "fall_thud"])
+def test_real_yamnet_recognizes_most_simulated_sounds(event: str) -> None:
+    pytest.importorskip("onnxruntime")
+    from edge_ai.inputs.audio import SimulatedSoundInput
+
+    engine = YAMNetInferenceEngine(_REAL_MODEL, background_threshold=0.1)
+    source = SimulatedSoundInput([event], seed=1)
+
+    labels = [engine.predict(source.read().samples).label for _ in range(20)]
+
+    assert labels.count(event) >= 16
+
+
 def test_yamnet_rejects_an_invalid_scores_shape(tmp_path: Path) -> None:
     engine, _ = build_engine(tmp_path, np.zeros((1, 520), dtype=np.float32))
 

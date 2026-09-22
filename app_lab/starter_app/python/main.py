@@ -1,8 +1,8 @@
 """Run the bundled sound pipeline and show matching UNO Q matrix icons.
 
-App Lab runs this file on the board. The selected package configuration either
-generates deterministic demo audio or replays bundled WAV fixtures through the
-real YAMNet model. Raw samples stay in this process.
+App Lab runs this file on the board. The bundled ``sound-uno-q.toml`` selects the
+input (synthetic sounds, bundled WAV fixtures, or the USB microphone) and the
+classifier. Raw samples stay in this process.
 """
 
 from __future__ import annotations

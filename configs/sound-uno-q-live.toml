@@ -1,0 +1,38 @@
+# Board live mode: a USB microphone through App Lab's ALSA peripheral, YAMNet on the
+# UNO Q's CPU, and the classified event drawn on the matrix. Package it with
+#   uv run python scripts/package_app_lab.py --config configs/sound-uno-q-live.toml
+# The microphone needs a powered USB-C hub and App Lab in Network Mode.
+[runtime]
+interval_seconds = 0.0
+
+[input]
+type = "arduino_microphone"
+# Omit `device` to use the first plugged-in USB microphone.
+sample_rate = 16000
+duration_seconds = 1.0
+
+[preprocessing]
+type = "audio_waveform"
+sample_rate = 16000
+duration_seconds = 1.0
+peak_normalize = false
+
+[inference]
+type = "yamnet"
+model = "../models/yamnet.onnx"
+background_threshold = 0.10
+
+[decision]
+type = "sound_events"
+# Starting values only: calibrate these with genuine recordings from the deployment room.
+thresholds = { smoke_alarm = 0.25, glass_break = 0.20, fall_thud = 0.20 }
+confirmations = { smoke_alarm = 2, glass_break = 1, fall_thud = 1 }
+hold_seconds = 3.0
+notification_cooldown_seconds = 60.0
+
+[hardware]
+type = "uno_q"
+
+[notifications]
+type = "none"
+device_name = "Home sound monitor"

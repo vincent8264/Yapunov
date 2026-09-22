@@ -1,4 +1,5 @@
-# The simulated board demo imports the bundled edge_ai package. NumPy runs the
-# audio features; tzdata lets email timestamps use the configured timezone.
+# Runtime packages for the bundled edge_ai pipeline. NumPy runs the audio path;
+# tzdata lets email timestamps use the configured timezone. The packager appends
+# onnxruntime when the board config uses YAMNet.
 numpy>=2.1
 tzdata>=2025.2
