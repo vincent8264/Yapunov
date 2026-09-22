@@ -14,6 +14,7 @@ from edge_ai.hardware.icons import ICONS
 
 class UnoQHardware(HardwareBackend):
     def __init__(self, bridge: Any | None = None) -> None:
+        self._alert_active = False
         if bridge is not None:
             self._bridge = bridge
             return
@@ -40,6 +41,7 @@ class UnoQHardware(HardwareBackend):
         response = self._bridge.call("show_alert", event)
         if response != "ok":
             raise RuntimeError(f"UNO Q display alert returned {response!r}")
+        self._alert_active = True
 
     def clear_alert(self) -> None:
         response: Any = None
@@ -49,6 +51,19 @@ class UnoQHardware(HardwareBackend):
             self.set_led(False)
         if response != "ok":
             raise RuntimeError(f"UNO Q clear alert returned {response!r}")
+        self._alert_active = False
+
+    def show_spectrum(self, columns: tuple[int, ...]) -> None:
+        if len(columns) != 13 or any(
+            isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 8
+            for value in columns
+        ):
+            raise ValueError("audio spectrum must contain 13 integer levels from 0 through 8")
+        if self._alert_active:
+            return
+        response = self._bridge.call("show_spectrum", "".join(str(value) for value in columns))
+        if response != "ok":
+            raise RuntimeError(f"UNO Q display spectrum returned {response!r}")
 
     def set_pwm(self, channel: int, value: float) -> None:
         if not 0.0 <= value <= 1.0:
@@ -70,6 +85,7 @@ class UnoQHardware(HardwareBackend):
         if decision.action == "alert":
             if decision.event is None:
                 self.set_led(True)
+                self._alert_active = True
             else:
                 self.show_alert(decision.event)
         else:

@@ -25,7 +25,7 @@ background_threshold = 0.10
 type = "sound_events"
 thresholds = { smoke_alarm = 0.25, glass_break = 0.20, fall_thud = 0.20 }
 confirmations = { smoke_alarm = 2, glass_break = 1, fall_thud = 1 }
-hold_seconds = 3.0
+hold_seconds = 5.0
 notification_cooldown_seconds = 60.0
 
 [hardware]

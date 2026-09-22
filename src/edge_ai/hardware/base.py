@@ -27,6 +27,9 @@ class HardwareBackend(ABC):
         """Clear the current visual event."""
         self.set_led(False)
 
+    def show_spectrum(self, columns: tuple[int, ...]) -> None:
+        """Render a low-priority 13-band audio spectrum when supported."""
+
     @abstractmethod
     def apply_decision(self, decision: Decision) -> None: ...
 

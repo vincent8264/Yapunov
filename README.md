@@ -22,9 +22,11 @@ Hardware
 ```
 
 During development, `MockHardware` records the selected visual alert. On the UNO Q,
-`UnoQHardware` sends only the high-level event name across the Bridge and the STM32
-renders the corresponding matrix icon. Raw microphone frames never enter the
-notification or hardware APIs.
+`UnoQHardware` sends high-level event names across the Bridge and the STM32 renders
+the corresponding matrix icon. In normal operation the configured live sound display
+sends a derived 13-band audio spectrum at 20 Hz; raw microphone frames never
+enter the notification or hardware APIs. Confirmed alert icons take priority over the
+idle spectrum.
 
 ## Setup
 
@@ -74,9 +76,23 @@ Then select the MOVO USB-M1 as the operating system's default input and run:
 uv run edge-ai run --config configs/sound-live.toml
 ```
 
+To see the 13×8 matrix on the PC instead of printing `MOCK` spectrum rows, use the
+desktop preview (close its window or press Ctrl+C to stop):
+
+```bash
+uv run edge-ai run --config configs/sound-live-preview.toml
+```
+
 If the microphone is not the default, add its verified name or index as `device` in
 the `[input]` section. On Linux, the `sounddevice` package also requires the system's
 PortAudio runtime.
+
+The live configuration uses `[display]` to sample 50 ms audio chunks at 20 Hz and
+render their 13-band FFT spectrum on the 13×8 matrix. It accumulates those same
+chunks into the unchanged one-second YAMNet inference window. Adjust `floor_db` and
+`ceiling_db` only after measuring the deployment room; the display contains no raw
+audio and does not affect classification. Confirmed danger icons stay visible for
+five seconds in the live configurations before the spectrum resumes.
 
 Stop it with Ctrl+C, or run a fixed number of iterations:
 

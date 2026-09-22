@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from edge_ai.inference.spectral import SpectralSoundInferenceEngine
+from edge_ai.audio_display import AudioSpectrum
 from edge_ai.inputs.audio import AudioFrame, MicrophoneInput, SimulatedSoundInput, WavAudioInput
 from edge_ai.preprocessing.audio import extract_audio_features, prepare_audio_waveform
 
@@ -78,6 +79,27 @@ def test_simulated_audio_exercises_all_demo_classes() -> None:
 def test_audio_frame_rejects_non_finite_samples() -> None:
     with pytest.raises(ValueError, match="finite"):
         AudioFrame(np.array([np.nan], dtype=np.float32), 16_000)
+
+
+def test_audio_spectrum_separates_bands_and_reassembles_model_window() -> None:
+    spectrum = AudioSpectrum(rate_hz=20, inference_duration_seconds=1.0)
+    samples = np.arange(800, dtype=np.float32) / 16_000
+    quiet = AudioFrame(np.zeros(800, dtype=np.float32), 16_000)
+    tone = AudioFrame(np.sin(2 * np.pi * 2_000 * samples), 16_000)
+
+    assert spectrum.update(quiet) == (0,) * 13
+    columns = spectrum.update(tone)
+    assert max(columns) > 0
+    assert columns.index(max(columns)) > 6
+
+    assert spectrum.append_for_inference(quiet) is None
+    for _ in range(18):
+        assert spectrum.append_for_inference(quiet) is None
+    window = spectrum.append_for_inference(tone)
+
+    assert window is not None
+    assert window.samples.shape == (16_000,)
+    assert window.samples[-800:].tolist() == tone.samples.tolist()
 
 
 def test_microphone_reads_and_closes_injected_stream() -> None:
