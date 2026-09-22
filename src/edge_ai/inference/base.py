@@ -9,6 +9,8 @@ from typing import Any
 class InferenceResult:
     label: str
     confidence: float
+    model_label: str | None = None
+    model_confidence: float | None = None
 
 
 class InferenceEngine(ABC):

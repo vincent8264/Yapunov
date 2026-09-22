@@ -38,6 +38,8 @@ def run_pipeline(
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             emit(
                 f"step={steps} label={result.label} confidence={result.confidence:.3f} "
+                f"yamnet_label={result.model_label or '-'} "
+                f"yamnet_confidence={result.model_confidence if result.model_confidence is not None else 0.0:.3f} "
                 f"action={decision.action} event={decision.event or '-'} "
                 f"notify={str(decision.notify).lower()} latency_ms={elapsed_ms:.1f}"
             )

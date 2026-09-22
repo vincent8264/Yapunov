@@ -1,6 +1,7 @@
 """YAMNet-specific ONNX inference and AudioSet-to-project label mapping."""
 
 from collections.abc import Callable, Mapping, Sequence
+import csv
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,31 @@ DEFAULT_EVENT_CLASS_INDICES: Mapping[str, tuple[int, ...]] = {
 SessionFactory = Callable[..., Any]
 
 
+def load_yamnet_class_labels(path: Path) -> tuple[str, ...]:
+    """Load and validate YAMNet's fixed 521-row AudioSet class map."""
+    try:
+        with Path(path).open(newline="", encoding="utf-8") as source:
+            rows = list(csv.DictReader(source))
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"YAMNet class map not found: {path}") from exc
+    except csv.Error as exc:
+        raise ValueError(f"could not read YAMNet class map {path}: {exc}") from exc
+
+    if len(rows) != 521:
+        raise ValueError("YAMNet class map must contain exactly 521 labels")
+    labels: list[str] = []
+    for expected_index, row in enumerate(rows):
+        try:
+            index = int(row["index"])
+            label = row["display_name"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("YAMNet class map must contain index and display_name columns") from exc
+        if index != expected_index or not label:
+            raise ValueError("YAMNet class map indices must run from 0 through 520")
+        labels.append(label)
+    return tuple(labels)
+
+
 class YAMNetInferenceEngine(InferenceEngine):
     """Run waveform-input YAMNet and reduce its multi-label scores to project events."""
 
@@ -34,6 +60,8 @@ class YAMNetInferenceEngine(InferenceEngine):
         *,
         background_threshold: float = 0.1,
         event_class_indices: Mapping[str, Sequence[int]] = DEFAULT_EVENT_CLASS_INDICES,
+        class_map_path: Path | None = None,
+        class_labels: Sequence[str] | None = None,
         session_factory: SessionFactory | None = None,
     ) -> None:
         path = Path(model_path)
@@ -79,6 +107,13 @@ class YAMNetInferenceEngine(InferenceEngine):
         self.scores_output_name = scores_outputs[0].name
         self.background_threshold = background_threshold
         self.event_class_indices = normalized_mapping
+        if class_labels is None:
+            class_labels = load_yamnet_class_labels(
+                class_map_path or path.with_name("yamnet_class_map.csv")
+            )
+        if len(class_labels) != self.CLASS_COUNT or any(not label for label in class_labels):
+            raise ValueError("YAMNet class labels must contain exactly 521 non-empty labels")
+        self.class_labels = tuple(class_labels)
 
     def predict(self, data: Any) -> InferenceResult:
         waveform = np.asarray(data, dtype=np.float32)
@@ -101,6 +136,11 @@ class YAMNetInferenceEngine(InferenceEngine):
         if not np.all(np.isfinite(scores)):
             raise ValueError("YAMNet scores must contain only finite values")
 
+        raw_index = int(np.argmax(scores))
+        raw_frame, raw_class_index = np.unravel_index(raw_index, scores.shape)
+        raw_confidence = float(np.clip(scores[raw_frame, raw_class_index], 0.0, 1.0))
+        raw_label = self.class_labels[raw_class_index]
+
         event_scores = {
             event: float(np.max(scores[:, indices]))
             for event, indices in self.event_class_indices.items()
@@ -108,5 +148,15 @@ class YAMNetInferenceEngine(InferenceEngine):
         event, confidence = max(event_scores.items(), key=lambda item: item[1])
         confidence = float(np.clip(confidence, 0.0, 1.0))
         if confidence < self.background_threshold:
-            return InferenceResult("background", 1.0 - confidence)
-        return InferenceResult(event, confidence)
+            return InferenceResult(
+                "background",
+                1.0 - confidence,
+                model_label=raw_label,
+                model_confidence=raw_confidence,
+            )
+        return InferenceResult(
+            event,
+            confidence,
+            model_label=raw_label,
+            model_confidence=raw_confidence,
+        )

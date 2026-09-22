@@ -32,7 +32,9 @@ task-specific outputs, add and test a model-specific `output_adapter`.
   frame covers 0.96 seconds and advances 0.48 seconds.
 - Outputs: `output_0` is `[frames, 521]` sigmoid AudioSet class scores; `output_1` is
   `[frames, 1024]` embeddings; `output_2` is the 64-band log-mel representation.
-- Label order: the fixed 521-row `yamnet_class_map.csv` distributed with the model.
+- Label order: the fixed 521-row `yamnet_class_map.csv` distributed with the model,
+  committed here so runtime output can name the model's top AudioSet class. Its
+  SHA-256 is `cdf24d193e196d9e95912a2667051ae203e92a2ba09449218ccb40ef787c6df2`.
 
 Download the model once during setup:
 
@@ -52,6 +54,10 @@ groups:
 `fall_thud` means a heavy impact signature, not confirmation that a person fell.
 Scores are multi-label probabilities rather than a softmax distribution. The live
 configuration's thresholds are unvalidated starting points, not safety claims.
+
+The runner prints both `label` (the project event or `background`, which drives the
+alert policy) and `yamnet_label`/`yamnet_confidence` (the highest raw AudioSet score).
+The latter is diagnostic only and never triggers hardware or notifications.
 
 Before the field demo, validate genuine MOVO USB-M1 recordings at different ranges,
 ordinary household noise, television playback, dishes, doors, dropped objects, and

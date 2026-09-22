@@ -4,7 +4,6 @@ from typing import Any
 import numpy as np
 import pytest
 
-from edge_ai.inference.base import InferenceResult
 from edge_ai.inference.yamnet import YAMNetInferenceEngine
 
 
@@ -57,6 +56,7 @@ def build_engine(
     engine = YAMNetInferenceEngine(
         path,
         background_threshold=background_threshold,
+        class_labels=tuple(f"class_{index}" for index in range(521)),
         session_factory=factory,
     )
     return engine, session
@@ -81,7 +81,10 @@ def test_yamnet_maps_audioset_classes_to_project_events(
 
     result = engine.predict(np.zeros(16_000, dtype=np.float32))
 
-    assert result == InferenceResult(expected_label, pytest.approx(0.9))
+    assert result.label == expected_label
+    assert result.confidence == pytest.approx(0.9)
+    assert result.model_label == f"class_{class_index}"
+    assert result.model_confidence == pytest.approx(0.9)
     assert session.feeds is not None
     assert session.feeds["waveform"].shape == (16_000,)
     assert session.feeds["waveform"].dtype == np.float32
@@ -96,6 +99,8 @@ def test_yamnet_returns_background_below_target_floor(tmp_path: Path) -> None:
 
     assert result.label == "background"
     assert result.confidence == pytest.approx(0.96)
+    assert result.model_label == "class_393"
+    assert result.model_confidence == pytest.approx(0.04)
 
 
 def test_yamnet_rejects_an_invalid_scores_shape(tmp_path: Path) -> None:
