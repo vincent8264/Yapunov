@@ -6,8 +6,11 @@ interval_seconds = 0.0
 
 [input]
 type = "microphone"
-sample_rate = 16000
+# This verified USB microphone exposes 48 kHz capture on this laptop. The
+# waveform preprocessor below resamples each frame to YAMNet's 16 kHz input.
+sample_rate = 48000
 duration_seconds = 1.0
+device = "UAC 1.0 Microphone"
 
 [preprocessing]
 type = "audio_waveform"

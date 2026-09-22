@@ -88,3 +88,45 @@ def test_microphone_reads_and_closes_injected_stream() -> None:
     assert frame.samples.shape == (2_000,)
     assert stream.stopped is True
     assert stream.closed is True
+
+
+def test_microphone_falls_back_to_callback_stream_when_blocking_is_unsupported() -> None:
+    class Stream:
+        stopped = False
+        closed = False
+
+        def __init__(self, callback: object) -> None:
+            self.callback = callback
+
+        def start(self) -> None:
+            self.callback(np.full((4, 1), 0.25, dtype=np.float32), 4, None, None)
+
+        def stop(self) -> None:
+            self.stopped = True
+
+        def close(self) -> None:
+            self.closed = True
+
+    class Backend:
+        stream: Stream | None = None
+
+        @classmethod
+        def InputStream(cls, **kwargs: object) -> Stream:
+            callback = kwargs.get("callback")
+            if callback is None:
+                raise RuntimeError("blocking API unsupported")
+            cls.stream = Stream(callback)
+            return cls.stream
+
+    source = MicrophoneInput(
+        sample_rate=8,
+        duration_seconds=0.5,
+        device=31,
+        backend=Backend,
+    )
+
+    assert np.all(source.read().samples == 0.25)
+    source.close()
+    assert Backend.stream is not None
+    assert Backend.stream.stopped is True
+    assert Backend.stream.closed is True

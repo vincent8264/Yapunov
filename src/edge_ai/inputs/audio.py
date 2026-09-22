@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import queue
 import random
 import wave
 from typing import Any, Sequence
@@ -121,6 +122,9 @@ class MicrophoneInput(InputSource):
                 ) from exc
         self.sample_rate = sample_rate
         self.frame_count = round(sample_rate * duration_seconds)
+        self._callback_queue: queue.Queue[np.ndarray] | None = None
+        self._callback_samples = np.empty(0, dtype=np.float32)
+        self._callback_stream = False
         try:
             self._stream = backend.InputStream(
                 samplerate=sample_rate,
@@ -131,9 +135,48 @@ class MicrophoneInput(InputSource):
             )
             self._stream.start()
         except Exception as exc:
-            raise RuntimeError(f"could not open microphone {device!r}: {exc}") from exc
+            # Some Windows WDM-KS devices do not implement SoundDevice's blocking
+            # read API but do accept an input callback. Keep both paths so ordinary
+            # devices and injected test streams remain simple.
+            self._callback_queue = queue.Queue()
+            try:
+                self._stream = backend.InputStream(
+                    samplerate=sample_rate,
+                    channels=1,
+                    dtype="float32",
+                    blocksize=self.frame_count,
+                    device=device,
+                    callback=self._capture_callback,
+                )
+                self._stream.start()
+                self._callback_stream = True
+            except Exception as callback_exc:
+                raise RuntimeError(
+                    f"could not open microphone {device!r}: {callback_exc} "
+                    f"(blocking stream also failed: {exc})"
+                ) from callback_exc
+
+    def _capture_callback(self, samples: np.ndarray, frames: int, *_: object) -> None:
+        if self._callback_queue is None:
+            return
+        captured = np.asarray(samples, dtype=np.float32).reshape(-1).copy()
+        if captured.size:
+            self._callback_queue.put_nowait(captured)
 
     def read(self) -> AudioFrame:
+        if self._callback_stream:
+            assert self._callback_queue is not None
+            while self._callback_samples.size < self.frame_count:
+                try:
+                    next_samples = self._callback_queue.get(timeout=3.0)
+                except queue.Empty as exc:
+                    raise RuntimeError("microphone callback timed out") from exc
+                self._callback_samples = np.concatenate(
+                    (self._callback_samples, next_samples)
+                )
+            samples = self._callback_samples[: self.frame_count]
+            self._callback_samples = self._callback_samples[self.frame_count :]
+            return AudioFrame(samples, self.sample_rate)
         samples, overflowed = self._stream.read(self.frame_count)
         if overflowed:
             raise RuntimeError("microphone input overflowed; audio samples were lost")
