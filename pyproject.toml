@@ -9,6 +9,7 @@ dependencies = [
     "onnxruntime>=1.20",
     "opencv-python>=4.10",
     "sounddevice>=0.5.2",
+    "tzdata>=2025.2; sys_platform == 'win32'",
 ]
 
 [project.scripts]

@@ -19,6 +19,22 @@ def test_waveform_resamples_and_pads_to_exact_shape() -> None:
     assert np.all(np.isfinite(waveform))
 
 
+def test_downsampling_preserves_passband_and_rejects_aliases() -> None:
+    sample_rate = 48_000
+    time_axis = np.arange(sample_rate, dtype=np.float32) / sample_rate
+    passband = AudioFrame(np.sin(2 * np.pi * 1_000 * time_axis), sample_rate)
+    stopband = AudioFrame(np.sin(2 * np.pi * 12_000 * time_axis), sample_rate)
+
+    passed = prepare_audio_waveform(passband, sample_rate=16_000, duration_seconds=1.0)
+    rejected = prepare_audio_waveform(stopband, sample_rate=16_000, duration_seconds=1.0)
+
+    # Ignore the short filter transients at the boundaries.
+    assert np.sqrt(np.mean(np.square(passed[64:-64]))) == pytest.approx(
+        1 / np.sqrt(2), rel=0.02
+    )
+    assert np.sqrt(np.mean(np.square(rejected[64:-64]))) < 0.01
+
+
 def test_wav_input_downmixes_stereo_pcm(tmp_path: Path) -> None:
     path = tmp_path / "stereo.wav"
     stereo = np.array([[32767, -32768], [16384, 16384]], dtype="<i2")
