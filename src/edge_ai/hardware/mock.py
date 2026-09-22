@@ -11,6 +11,8 @@ class MockHardware(HardwareBackend):
         self.pwm_values: dict[int, float] = {}
         self.servo_positions: dict[int, float] = {}
         self.last_decision: Decision | None = None
+        self.current_alert: str | None = None
+        self.alert_history: list[str] = []
 
     def _print(self, message: str) -> None:
         if self.verbose:
@@ -35,12 +37,25 @@ class MockHardware(HardwareBackend):
         self.servo_positions[channel] = degrees
         self._print(f"SERVO {channel} -> {degrees:.1f} degrees")
 
+    def show_alert(self, event: str) -> None:
+        self.current_alert = event
+        self.alert_history.append(event)
+        self._print(f"DISPLAY: {event}")
+        self.set_led(True)
+
+    def clear_alert(self) -> None:
+        self.current_alert = None
+        self.set_led(False)
+
     def apply_decision(self, decision: Decision) -> None:
         self.last_decision = decision
         self._print(f"ACTION: {decision.action}")
-        self.set_led(decision.action == "alert")
+        if decision.action == "alert":
+            self.show_alert(decision.event or "alert")
+        else:
+            self.clear_alert()
 
     def shutdown(self) -> None:
-        self.set_led(False)
+        self.clear_alert()
         for channel in tuple(self.pwm_values):
             self.set_pwm(channel, 0.0)

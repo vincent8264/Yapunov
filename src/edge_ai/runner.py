@@ -38,7 +38,8 @@ def run_pipeline(
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             emit(
                 f"step={steps} label={result.label} confidence={result.confidence:.3f} "
-                f"action={decision.action} latency_ms={elapsed_ms:.1f}"
+                f"action={decision.action} event={decision.event or '-'} "
+                f"notify={str(decision.notify).lower()} latency_ms={elapsed_ms:.1f}"
             )
             delay = configured.interval_seconds - (time.perf_counter() - started)
             if delay > 0.0 and (max_steps is None or steps < max_steps):

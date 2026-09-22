@@ -3,6 +3,7 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
+import os
 from pathlib import Path
 import tomllib
 from typing import Any
@@ -14,12 +15,18 @@ from edge_ai.hardware.uno_q import UnoQHardware
 from edge_ai.inference.base import InferenceEngine, InferenceResult
 from edge_ai.inference.dummy import DummyInferenceEngine
 from edge_ai.inference.onnx import ONNXInferenceEngine
+from edge_ai.inference.spectral import SpectralSoundInferenceEngine
+from edge_ai.inference.yamnet import YAMNetInferenceEngine
+from edge_ai.inputs.audio import MicrophoneInput, SimulatedSoundInput, WavAudioInput
 from edge_ai.inputs.base import InputSource
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
 from edge_ai.inputs.webcam import WebcamInput
 from edge_ai.pipeline import Pipeline
+from edge_ai.notifications import AsyncNotifier, Notifier, NotifyingHardware, SMTPNotifier
+from edge_ai.preprocessing.audio import extract_audio_features, prepare_audio_waveform
 from edge_ai.preprocessing.image import preprocess_image
 from edge_ai.preprocessing.sensor import normalize_sensor
+from edge_ai.sound_decision import SoundDecisionPolicy
 
 
 class ConfigError(ValueError):
@@ -69,7 +76,28 @@ def _number(section: Mapping[str, Any], key: str, default: float) -> float:
     return float(value)
 
 
-def _build_input(section: Mapping[str, Any]) -> InputSource:
+def _integer(section: Mapping[str, Any], key: str, default: int) -> int:
+    value = section.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{key} must be an integer")
+    return value
+
+
+def _boolean(section: Mapping[str, Any], key: str, default: bool) -> bool:
+    value = section.get(key, default)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{key} must be a boolean")
+    return value
+
+
+def _required_string(section: Mapping[str, Any], key: str, section_name: str) -> str:
+    value = section.get(key)
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"[{section_name}].{key} must be a non-empty string")
+    return value
+
+
+def _build_input(section: Mapping[str, Any], config_dir: Path) -> InputSource:
     component_type = _component_type(section, "input")
     if component_type == "simulated_sensor":
         seed = section.get("seed")
@@ -90,6 +118,50 @@ def _build_input(section: Mapping[str, Any]) -> InputSource:
         if isinstance(camera_index, bool) or not isinstance(camera_index, int):
             raise ConfigError("[input].camera_index must be an integer")
         return WebcamInput(camera_index=camera_index)
+    if component_type == "wav":
+        raw_paths = section.get("paths")
+        if not isinstance(raw_paths, list) or not raw_paths or not all(
+            isinstance(path, str) and path for path in raw_paths
+        ):
+            raise ConfigError("[input].paths must be a non-empty array of WAV paths")
+        try:
+            return WavAudioInput(
+                [(config_dir / path).resolve() for path in raw_paths],
+                loop=_boolean(section, "loop", True),
+            )
+        except ValueError as exc:
+            raise ConfigError(f"invalid [input] configuration: {exc}") from exc
+    if component_type == "microphone":
+        device = section.get("device")
+        if device is not None and (
+            isinstance(device, bool) or not isinstance(device, (str, int))
+        ):
+            raise ConfigError("[input].device must be a device name or integer index")
+        try:
+            return MicrophoneInput(
+                sample_rate=_integer(section, "sample_rate", 16_000),
+                duration_seconds=_number(section, "duration_seconds", 1.0),
+                device=device,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise ConfigError(f"invalid [input] configuration: {exc}") from exc
+    if component_type == "simulated_sound":
+        events = section.get(
+            "events",
+            ["background", "smoke_alarm", "background", "glass_break", "background", "fall_thud"],
+        )
+        if not isinstance(events, list) or not all(isinstance(event, str) for event in events):
+            raise ConfigError("[input].events must be an array of strings")
+        try:
+            return SimulatedSoundInput(
+                events,
+                sample_rate=_integer(section, "sample_rate", 16_000),
+                duration_seconds=_number(section, "duration_seconds", 1.0),
+                seed=_integer(section, "seed", 7),
+                loop=_boolean(section, "loop", True),
+            )
+        except ValueError as exc:
+            raise ConfigError(f"invalid [input] configuration: {exc}") from exc
     raise ConfigError(f"unsupported [input].type: {component_type!r}")
 
 
@@ -122,6 +194,25 @@ def _build_preprocessor(section: Mapping[str, Any]) -> Callable[[Any], Any]:
         if not isinstance(normalize, bool):
             raise ConfigError("[preprocessing].normalize must be a boolean")
         return partial(preprocess_image, size=(size[0], size[1]), normalize=normalize)
+    if component_type in {"audio_waveform", "audio_features"}:
+        sample_rate = _integer(section, "sample_rate", 16_000)
+        duration_seconds = _number(section, "duration_seconds", 1.0)
+        if sample_rate < 1:
+            raise ConfigError("[preprocessing].sample_rate must be positive")
+        if duration_seconds <= 0.0:
+            raise ConfigError("[preprocessing].duration_seconds must be positive")
+        if component_type == "audio_waveform":
+            return partial(
+                prepare_audio_waveform,
+                sample_rate=sample_rate,
+                duration_seconds=duration_seconds,
+                peak_normalize=_boolean(section, "peak_normalize", False),
+            )
+        return partial(
+            extract_audio_features,
+            sample_rate=sample_rate,
+            duration_seconds=duration_seconds,
+        )
     raise ConfigError(f"unsupported [preprocessing].type: {component_type!r}")
 
 
@@ -156,6 +247,22 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
             )
         except (FileNotFoundError, ValueError) as exc:
             raise ConfigError(str(exc)) from exc
+    if component_type == "spectral_demo":
+        try:
+            return SpectralSoundInferenceEngine(min_rms=_number(section, "min_rms", 0.02))
+        except ValueError as exc:
+            raise ConfigError(f"invalid [inference] configuration: {exc}") from exc
+    if component_type == "yamnet":
+        model = section.get("model")
+        if not isinstance(model, str) or not model:
+            raise ConfigError("[inference].model must be a non-empty path")
+        try:
+            return YAMNetInferenceEngine(
+                (config_dir / model).resolve(),
+                background_threshold=_number(section, "background_threshold", 0.1),
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise ConfigError(str(exc)) from exc
     raise ConfigError(f"unsupported [inference].type: {component_type!r}")
 
 
@@ -163,6 +270,47 @@ def _build_decision(section: Mapping[str, Any]) -> Callable[[InferenceResult], D
     component_type = _component_type(section, "decision")
     if component_type == "default":
         return decide
+    if component_type == "sound_events":
+        raw_thresholds = section.get("thresholds")
+        if not isinstance(raw_thresholds, dict) or not raw_thresholds:
+            raise ConfigError("[decision].thresholds must be a non-empty table")
+        thresholds: dict[str, float] = {}
+        for label, value in raw_thresholds.items():
+            if (
+                not isinstance(label, str)
+                or isinstance(value, bool)
+                or not isinstance(value, (int, float))
+            ):
+                raise ConfigError("[decision].thresholds must map labels to numbers")
+            thresholds[label] = float(value)
+        raw_confirmations = section.get("confirmations", 2)
+        confirmations: int | dict[str, int]
+        if isinstance(raw_confirmations, bool):
+            raise ConfigError("[decision].confirmations must be an integer or table")
+        if isinstance(raw_confirmations, int):
+            confirmations = raw_confirmations
+        elif isinstance(raw_confirmations, dict):
+            if not all(
+                isinstance(label, str)
+                and not isinstance(value, bool)
+                and isinstance(value, int)
+                for label, value in raw_confirmations.items()
+            ):
+                raise ConfigError("[decision].confirmations must map labels to integers")
+            confirmations = dict(raw_confirmations)
+        else:
+            raise ConfigError("[decision].confirmations must be an integer or table")
+        try:
+            return SoundDecisionPolicy(
+                thresholds,
+                confirmations=confirmations,
+                hold_seconds=_number(section, "hold_seconds", 3.0),
+                notification_cooldown_seconds=_number(
+                    section, "notification_cooldown_seconds", 60.0
+                ),
+            )
+        except ValueError as exc:
+            raise ConfigError(f"invalid [decision] configuration: {exc}") from exc
     raise ConfigError(f"unsupported [decision].type: {component_type!r}")
 
 
@@ -176,6 +324,46 @@ def _build_hardware(section: Mapping[str, Any]) -> HardwareBackend:
     if component_type == "uno_q":
         return UnoQHardware()
     raise ConfigError(f"unsupported [hardware].type: {component_type!r}")
+
+
+def _build_notifier(section: Mapping[str, Any]) -> tuple[Notifier | None, str]:
+    component_type = _component_type(section, "notifications")
+    device_name = section.get("device_name", "Home sound monitor")
+    if not isinstance(device_name, str) or not device_name:
+        raise ConfigError("[notifications].device_name must be a non-empty string")
+    if component_type == "none":
+        return None, device_name
+    if component_type != "smtp":
+        raise ConfigError(f"unsupported [notifications].type: {component_type!r}")
+
+    port = _integer(section, "port", 587)
+    if not 1 <= port <= 65_535:
+        raise ConfigError("[notifications].port must be between 1 and 65535")
+    username = section.get("username")
+    if username is not None and (not isinstance(username, str) or not username):
+        raise ConfigError("[notifications].username must be a non-empty string")
+    password_env = section.get("password_env")
+    if password_env is not None and (not isinstance(password_env, str) or not password_env):
+        raise ConfigError("[notifications].password_env must be a non-empty string")
+    if username is not None and password_env is None:
+        raise ConfigError("[notifications].password_env is required when username is set")
+    password = os.environ.get(password_env) if password_env is not None else None
+    if password_env is not None and password is None:
+        raise ConfigError(f"notification secret environment variable is not set: {password_env}")
+    timeout_seconds = _number(section, "timeout_seconds", 5.0)
+    if timeout_seconds <= 0.0:
+        raise ConfigError("[notifications].timeout_seconds must be positive")
+    notifier = SMTPNotifier(
+        host=_required_string(section, "host", "notifications"),
+        port=port,
+        sender=_required_string(section, "sender", "notifications"),
+        recipient=_required_string(section, "recipient", "notifications"),
+        username=username,
+        password=password,
+        starttls=_boolean(section, "starttls", True),
+        timeout_seconds=timeout_seconds,
+    )
+    return AsyncNotifier(notifier), device_name
 
 
 def _load_document(path: Path) -> tuple[Path, Mapping[str, Any]]:
@@ -251,14 +439,25 @@ def load_config(path: Path) -> ConfiguredPipeline:
     if interval_seconds < 0.0:
         raise ConfigError("[runtime].interval_seconds must be non-negative")
 
-    input_source = _build_input(_table(document, "input"))
+    input_source = _build_input(_table(document, "input"), config_path.parent)
     try:
+        preprocessor = _build_preprocessor(_table(document, "preprocessing"))
+        inference = _build_inference(_table(document, "inference"), config_path.parent)
+        decision_function = _build_decision(_table(document, "decision"))
+        hardware = _build_hardware(_table(document, "hardware"))
+        notifications = document.get("notifications")
+        if notifications is not None:
+            if not isinstance(notifications, dict):
+                raise ConfigError("invalid [notifications] section")
+            notifier, device_name = _build_notifier(notifications)
+            if notifier is not None:
+                hardware = NotifyingHardware(hardware, notifier, device_name=device_name)
         pipeline = Pipeline(
             input_source=input_source,
-            preprocessor=_build_preprocessor(_table(document, "preprocessing")),
-            inference=_build_inference(_table(document, "inference"), config_path.parent),
-            decision_function=_build_decision(_table(document, "decision")),
-            hardware=_build_hardware(_table(document, "hardware")),
+            preprocessor=preprocessor,
+            inference=inference,
+            decision_function=decision_function,
+            hardware=hardware,
         )
     except Exception:
         close = getattr(input_source, "close", None)

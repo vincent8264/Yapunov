@@ -9,6 +9,9 @@ from edge_ai.inference.base import InferenceResult
 class Decision:
     action: str
     value: float | None = None
+    event: str | None = None
+    confidence: float | None = None
+    notify: bool = False
 
 
 def decide(result: InferenceResult) -> Decision:

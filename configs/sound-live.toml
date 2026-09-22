@@ -1,0 +1,37 @@
+# Live local-only YAMNet configuration for the MOVO USB-M1. Download the model
+# documented in models/README.md before running. Omit `device` to use the operating
+# system's default input, or set it to the verified device name/index.
+[runtime]
+interval_seconds = 0.0
+
+[input]
+type = "microphone"
+sample_rate = 16000
+duration_seconds = 1.0
+
+[preprocessing]
+type = "audio_waveform"
+sample_rate = 16000
+duration_seconds = 1.0
+peak_normalize = false
+
+[inference]
+type = "yamnet"
+model = "../models/yamnet.onnx"
+background_threshold = 0.10
+
+[decision]
+type = "sound_events"
+# Starting values only: calibrate these with genuine recordings from the deployment room.
+thresholds = { smoke_alarm = 0.25, glass_break = 0.20, fall_thud = 0.20 }
+confirmations = { smoke_alarm = 2, glass_break = 1, fall_thud = 1 }
+hold_seconds = 3.0
+notification_cooldown_seconds = 60.0
+
+[hardware]
+type = "mock"
+verbose = true
+
+[notifications]
+type = "none"
+device_name = "Home sound monitor"

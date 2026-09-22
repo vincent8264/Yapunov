@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=2.1",
     "onnxruntime>=1.20",
     "opencv-python>=4.10",
+    "sounddevice>=0.5.2",
 ]
 
 [project.scripts]

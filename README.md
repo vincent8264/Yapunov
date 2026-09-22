@@ -1,6 +1,11 @@
-# Edge AI Hackathon Starter (Arduino UNO Q)
+# Private Local Sound Alerts (Arduino UNO Q)
 
-This repository provides a small, reusable Edge AI architecture for an Arduino UNO Q hackathon. It runs entirely on a Windows or macOS laptop today, without a board, camera, model, or network connection after dependencies are installed.
+This project detects safety-relevant sounds without a camera or cloud audio. Audio is
+captured and classified locally; only an event name, confidence, device name, and
+timestamp can leave the device when optional email notifications are enabled.
+
+The initial event set is smoke alarm, breaking glass, and a fall-like thud. Three
+distinct 8x8 icons are centered on the UNO Q's onboard 8x13 LED matrix.
 
 ## Architecture
 
@@ -16,7 +21,10 @@ Decision
 Hardware
 ```
 
-During development, `MockHardware` records and prints actions. On the UNO Q, the same pipeline can instead use `UnoQHardware`, which will send high-level decisions across the UNO Q Bridge to the STM32. Similarly, `DummyInferenceEngine` runs immediately without a model, while `ONNXInferenceEngine` loads a real ONNX model.
+During development, `MockHardware` records the selected visual alert. On the UNO Q,
+`UnoQHardware` sends only the high-level event name across the Bridge and the STM32
+renders the corresponding matrix icon. Raw microphone frames never enter the
+notification or hardware APIs.
 
 ## Setup
 
@@ -32,15 +40,42 @@ Run the hardware-free demo:
 uv run edge-ai run --config configs/demo.toml
 ```
 
+Run the deterministic three-sound integration demo:
+
+```bash
+uv run edge-ai run --config configs/sound-demo.toml --max-steps 6
+```
+
+This generates actual waveforms, extracts spectral features, classifies the three
+signatures, and records the visual decisions. Its transparent spectral rules validate
+the complete pipeline; they are not a production safety model.
+
+For live YAMNet inference, first download the model once (the application does not
+download anything at runtime):
+
+```bash
+curl -L https://huggingface.co/audiomagic/yamnet-onnx/resolve/main/yamnet.onnx \
+  -o models/yamnet.onnx
+```
+
+Then select the MOVO USB-M1 as the operating system's default input and run:
+
+```bash
+uv run edge-ai run --config configs/sound-live.toml
+```
+
+If the microphone is not the default, add its verified name or index as `device` in
+the `[input]` section. On Linux, the `sounddevice` package also requires the system's
+PortAudio runtime.
+
 Stop it with Ctrl+C, or run a fixed number of iterations:
 
 ```bash
 uv run edge-ai run --config configs/demo.toml --max-steps 5
 ```
 
-The TOML file selects the input, preprocessing, inference, decision, hardware backend,
-and loop interval. Copy `configs/demo.toml` when creating a challenge-specific setup;
-relative model paths are resolved from the config file's directory.
+The TOML file selects the input, preprocessing, inference, decision policy, hardware
+backend, and loop interval. WAV and model paths are resolved relative to the config.
 
 Run the tests with:
 
@@ -68,10 +103,55 @@ on the physical board.
    path relative to that config file (for example, `../models/model.onnx`). Set
    `output_type = "probabilities"` only after confirming that the model includes its
    output activation. Otherwise, add a model-specific output adapter in code.
-3. Adapt image/sensor preprocessing to the model's expected shape and dtype.
+3. Select `audio_waveform` preprocessing and match its sample rate and duration to the
+   model, or add a model-specific spectrogram adapter.
 4. If the model output is not a scalar or class-score vector, pass a model-specific `output_adapter` to `ONNXInferenceEngine`. This keeps conversion at the model boundary.
 
 No model is required for the demo or tests.
+
+The included `spectral_demo` engine remains a deterministic test baseline. The live
+configuration instead uses a YAMNet-specific ONNX adapter that consumes a raw 16 kHz
+mono waveform and reduces the model's 521 AudioSet outputs into the three project
+events. Before a field demo, evaluate it on genuine recordings from the MOVO
+microphone and deployment room and record its confusion matrix and thresholds.
+ONNX Runtime telemetry is explicitly disabled before model sessions are created.
+
+## Sound event policy
+
+The `sound_events` decision policy supports:
+
+- a separate confidence threshold for every event;
+- per-event confirmation counts, allowing sustained confirmation for alarms and a
+  single window for transient glass/impact events;
+- a visual hold time so an icon remains readable;
+- per-event notification cooldowns to avoid repeated messages.
+
+Background or unknown model labels do not trigger an alert. “Unfamiliar voice” is not
+claimed: identity-aware voice recognition needs consent, enrollment, and separate
+validation. A later extension can safely detect generic speech during configured quiet
+hours without identifying a speaker.
+
+## Optional email
+
+Add a section like this to a private deployment config:
+
+```toml
+[notifications]
+type = "smtp"
+device_name = "Living room sound monitor"
+host = "smtp.example.com"
+port = 587
+sender = "monitor@example.com"
+recipient = "family@example.com"
+username = "monitor@example.com"
+password_env = "EDGE_AI_SMTP_PASSWORD"
+starttls = true
+timeout_seconds = 5.0
+```
+
+Set the named environment variable outside the repository. Email work runs on a
+background queue; network failure cannot prevent the local matrix alert. No waveform,
+audio feature, or recording path is present in the notification data structure.
 
 ## Adding the UNO Q
 
@@ -79,10 +159,15 @@ When the board arrives:
 
 1. Open and test `app_lab/starter_app` in Arduino App Lab.
 2. Verify the installed App Lab and Bridge API versions against the board image.
-3. Implement and test only the verified Bridge calls in `UnoQHardware`. External PWM
-   and servo methods are deliberately guarded until their pins, power, endpoints, and
-   limits are known.
-4. Verify GPIO, PWM, servo pins, voltage levels, and communication with the STM32 using safe test hardware.
-5. Set `[hardware].type = "uno_q"` in the selected config; the rest of the pipeline stays unchanged.
+3. Test the `show_alert` and `clear_alert` Bridge calls using the three included icons.
+4. Confirm the installed `Arduino_LED_Matrix` and Bridge versions on the board.
+5. Set `[hardware].type = "uno_q"` in a copy of the live sound config; the rest of the
+   pipeline stays unchanged.
 
-The App Lab files follow Arduino's current documented structure and RPC concepts, but cannot be built or hardware-tested without an UNO Q. Pin choices and actuator wiring are intentionally left for the hackathon.
+The sketch uses the documented onboard matrix library and no external pins. It still
+requires compilation and visual verification on the supplied UNO Q. External PWM and
+servo paths remain deliberately disabled.
+
+The App Lab Python entrypoint cycles the three icons as a hardware smoke test. It is
+deliberately separate from classification so display/Bridge problems can be diagnosed
+without involving the microphone or model.

@@ -19,6 +19,14 @@ class HardwareBackend(ABC):
     @abstractmethod
     def move_servo(self, channel: int, degrees: float) -> None: ...
 
+    def show_alert(self, event: str) -> None:
+        """Display an event, falling back to the simplest available indicator."""
+        self.set_led(True)
+
+    def clear_alert(self) -> None:
+        """Clear the current visual event."""
+        self.set_led(False)
+
     @abstractmethod
     def apply_decision(self, decision: Decision) -> None: ...
 

@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 
+from edge_ai.decision import Decision
 from edge_ai.hardware.uno_q import UnoQHardware
 
 
@@ -41,3 +42,45 @@ def test_unverified_actuators_are_guarded_without_bridge_calls() -> None:
         hardware.move_servo(0, 90.0)
 
     assert bridge.calls == []
+
+
+def test_sound_decision_uses_matrix_bridge_endpoint() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    hardware.apply_decision(Decision("alert", event="glass_break", confidence=0.9))
+    hardware.apply_decision(Decision("idle"))
+
+    assert bridge.calls == [
+        ("show_alert", "glass_break"),
+        ("clear_alert",),
+        ("set_led", False),
+    ]
+
+
+def test_unknown_visual_alert_is_rejected_before_bridge_call() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    with pytest.raises(ValueError, match="unsupported visual alert"):
+        hardware.show_alert("unknown")
+
+    assert bridge.calls == []
+
+
+def test_shutdown_clears_matrix_and_builtin_led() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    hardware.shutdown()
+
+    assert bridge.calls == [("clear_alert",), ("set_led", False)]
+
+
+def test_generic_alert_falls_back_to_builtin_led() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    hardware.apply_decision(Decision("alert"))
+
+    assert bridge.calls == [("set_led", True)]

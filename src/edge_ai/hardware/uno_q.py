@@ -9,6 +9,7 @@ from typing import Any
 
 from edge_ai.decision import Decision
 from edge_ai.hardware.base import HardwareBackend
+from edge_ai.hardware.icons import ICONS
 
 
 class UnoQHardware(HardwareBackend):
@@ -33,6 +34,22 @@ class UnoQHardware(HardwareBackend):
     def set_led(self, enabled: bool) -> None:
         self._bridge.call("set_led", enabled)
 
+    def show_alert(self, event: str) -> None:
+        if event not in ICONS:
+            raise ValueError(f"unsupported visual alert: {event!r}")
+        response = self._bridge.call("show_alert", event)
+        if response != "ok":
+            raise RuntimeError(f"UNO Q display alert returned {response!r}")
+
+    def clear_alert(self) -> None:
+        response: Any = None
+        try:
+            response = self._bridge.call("clear_alert")
+        finally:
+            self.set_led(False)
+        if response != "ok":
+            raise RuntimeError(f"UNO Q clear alert returned {response!r}")
+
     def set_pwm(self, channel: int, value: float) -> None:
         if not 0.0 <= value <= 1.0:
             raise ValueError("PWM value must be between 0.0 and 1.0")
@@ -50,7 +67,13 @@ class UnoQHardware(HardwareBackend):
         )
 
     def apply_decision(self, decision: Decision) -> None:
-        self.set_led(decision.action == "alert")
+        if decision.action == "alert":
+            if decision.event is None:
+                self.set_led(True)
+            else:
+                self.show_alert(decision.event)
+        else:
+            self.clear_alert()
 
     def shutdown(self) -> None:
-        self.set_led(False)
+        self.clear_alert()

@@ -9,6 +9,8 @@ import onnxruntime as ort
 
 from edge_ai.inference.base import InferenceEngine, InferenceResult
 
+ort.disable_telemetry_events()
+
 OutputAdapter = Callable[[Sequence[Any]], InferenceResult]
 
 
