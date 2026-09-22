@@ -133,7 +133,14 @@ hours without identifying a speaker.
 
 ## Optional email
 
-Add a section like this to a private deployment config:
+Create the ignored private configuration from the checked-in template:
+
+```bash
+cp configs/private-live.example.toml configs/private-live.toml
+```
+
+Then edit the SMTP server, sender, recipient, device name, and timezone in
+`configs/private-live.toml`. Its notification section looks like this:
 
 ```toml
 [notifications]
@@ -147,11 +154,35 @@ username = "monitor@example.com"
 password_env = "EDGE_AI_SMTP_PASSWORD"
 starttls = true
 timeout_seconds = 5.0
+timezone = "America/Los_Angeles"
+status_log = true
 ```
 
-Set the named environment variable outside the repository. Email work runs on a
-background queue; network failure cannot prevent the local matrix alert. No waveform,
-audio feature, or recording path is present in the notification data structure.
+The private file is explicitly ignored by Git. Set the named password environment
+variable separately rather than writing the password into TOML:
+
+```bash
+export EDGE_AI_SMTP_PASSWORD='your-smtp-app-password'
+```
+
+In PowerShell, use
+`$env:EDGE_AI_SMTP_PASSWORD = 'your-smtp-app-password'` instead. Email work runs on
+a background queue; network failure cannot prevent the local matrix alert. No
+waveform, audio feature, or recording path is present in the notification data
+structure.
+Messages use fixed, event-specific wording; no LLM or other text-generation service is
+involved. Smoke alarms request an immediate check, while glass and fall-like impacts
+are explicitly described as possible events rather than confirmed emergencies.
+
+Before the demo, send one test email without starting the microphone, model, or
+hardware:
+
+```bash
+uv run edge-ai test-notification --config configs/private-live.toml --event smoke_alarm
+```
+
+The command exits with an error if delivery fails. During normal operation, successful
+and failed background deliveries are printed without exposing credentials or audio.
 
 ## Adding the UNO Q
 

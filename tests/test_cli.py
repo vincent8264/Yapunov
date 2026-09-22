@@ -1,0 +1,63 @@
+from pathlib import Path
+
+import pytest
+
+from edge_ai import cli
+from edge_ai.config import ConfiguredNotifier
+from edge_ai.notifications import AlertNotification, Notifier
+
+
+class RecordingNotifier(Notifier):
+    channel = "email"
+
+    def __init__(self) -> None:
+        self.alerts: list[AlertNotification] = []
+        self.closed = False
+
+    def notify(self, alert: AlertNotification) -> None:
+        self.alerts.append(alert)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_notification_command_sends_one_preset_alert(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notifier = RecordingNotifier()
+    monkeypatch.setattr(
+        cli,
+        "load_notification_config",
+        lambda path: ConfiguredNotifier(
+            notifier=notifier,
+            device_name="Living room",
+            local_timezone=cli.datetime.now().astimezone().tzinfo,
+        ),
+    )
+
+    result = cli.main(
+        [
+            "test-notification",
+            "--config",
+            "private.toml",
+            "--event",
+            "fall_thud",
+        ]
+    )
+
+    assert result == 0
+    assert len(notifier.alerts) == 1
+    assert notifier.alerts[0].event == "fall_thud"
+    assert notifier.alerts[0].device_name == "Living room"
+    assert notifier.closed
+    assert "Test notification delivered" in capsys.readouterr().out
+
+
+def test_notification_command_rejects_disabled_delivery(tmp_path: Path) -> None:
+    path = tmp_path / "disabled.toml"
+    path.write_text('[notifications]\ntype = "none"\n', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        cli.main(["test-notification", "--config", str(path)])
+
+    assert error.value.code == 2

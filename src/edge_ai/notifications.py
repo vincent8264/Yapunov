@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from email.message import EmailMessage
 import queue
 import smtplib
@@ -23,7 +24,61 @@ class AlertNotification:
     timestamp: str
 
 
+@dataclass(frozen=True)
+class NotificationMessage:
+    subject: str
+    body: str
+
+
+_EVENT_COPY: Final[dict[str, tuple[str, str, str]]] = {
+    "smoke_alarm": (
+        "Urgent: smoke alarm sound detected",
+        "A smoke alarm sound was detected",
+        "Please check immediately.",
+    ),
+    "glass_break": (
+        "Alert: possible glass-breaking sound",
+        "A possible glass-breaking sound was detected",
+        "Please check the area.",
+    ),
+    "fall_thud": (
+        "Alert: possible fall-like impact",
+        "A possible fall-like impact was detected",
+        "Please contact the resident.",
+    ),
+}
+
+
+def render_notification_message(alert: AlertNotification) -> NotificationMessage:
+    """Render fixed, cautious copy without sending event data to a text model."""
+    display_event = alert.event.replace("_", " ")
+    subject, lead, action = _EVENT_COPY.get(
+        alert.event,
+        (
+            f"Alert: {display_event} sound detected",
+            f"A {display_event} sound was detected",
+            "Please check the area.",
+        ),
+    )
+    return NotificationMessage(
+        subject=f"{subject} at {alert.device_name}",
+        body=(
+            f"{lead} at {alert.device_name} at {alert.timestamp}.\n\n"
+            f"{action}\n\n"
+            "Detection details:\n"
+            f"Event: {display_event}\n"
+            f"Classifier confidence: {alert.confidence:.1%}\n"
+            f"Device: {alert.device_name}\n"
+            f"Time: {alert.timestamp}\n\n"
+            "This is an automated sound-classification alert and does not confirm "
+            "an emergency. Only event metadata was sent; no audio left the device.\n"
+        ),
+    )
+
+
 class Notifier(ABC):
+    channel: str = "notification"
+
     @abstractmethod
     def notify(self, alert: AlertNotification) -> None: ...
 
@@ -33,6 +88,8 @@ class Notifier(ABC):
 
 class SMTPNotifier(Notifier):
     """Send event metadata through SMTP; audio is not accepted by this API."""
+
+    channel = "email"
 
     def __init__(
         self,
@@ -56,17 +113,12 @@ class SMTPNotifier(Notifier):
         self.timeout_seconds = timeout_seconds
 
     def notify(self, alert: AlertNotification) -> None:
+        rendered = render_notification_message(alert)
         message = EmailMessage()
-        message["Subject"] = f"Safety sound detected: {alert.event.replace('_', ' ')}"
+        message["Subject"] = rendered.subject
         message["From"] = self.sender
         message["To"] = self.recipient
-        message.set_content(
-            f"Device: {alert.device_name}\n"
-            f"Event: {alert.event}\n"
-            f"Confidence: {alert.confidence:.1%}\n"
-            f"Time: {alert.timestamp}\n\n"
-            "Only event metadata was sent. No audio left the device.\n"
-        )
+        message.set_content(rendered.body)
         with smtplib.SMTP(self.host, self.port, timeout=self.timeout_seconds) as client:
             if self.starttls:
                 client.starttls()
@@ -80,8 +132,20 @@ class AsyncNotifier(Notifier):
 
     _STOP: Final = object()
 
-    def __init__(self, delegate: Notifier, *, queue_size: int = 32) -> None:
+    def __init__(
+        self,
+        delegate: Notifier,
+        *,
+        queue_size: int = 32,
+        reporter: Callable[[str], None] | None = None,
+        close_timeout_seconds: float = 6.0,
+    ) -> None:
+        if close_timeout_seconds <= 0.0:
+            raise ValueError("notification close timeout must be positive")
         self.delegate = delegate
+        self.channel = delegate.channel
+        self.reporter = reporter
+        self.close_timeout_seconds = close_timeout_seconds
         self.errors: list[str] = []
         self.dropped = 0
         self._queue: queue.Queue[AlertNotification | object] = queue.Queue(queue_size)
@@ -93,6 +157,11 @@ class AsyncNotifier(Notifier):
             self._queue.put_nowait(alert)
         except queue.Full:
             self.dropped += 1
+            self._report(f"notification dropped: event={alert.event} reason=queue-full")
+
+    def _report(self, message: str) -> None:
+        if self.reporter is not None:
+            self.reporter(message)
 
     def _run(self) -> None:
         while True:
@@ -101,25 +170,45 @@ class AsyncNotifier(Notifier):
                 return
             try:
                 self.delegate.notify(alert)  # type: ignore[arg-type]
+                self._report(
+                    f"notification delivered: channel={self.channel} event={alert.event}"
+                )
             except Exception as exc:
-                self.errors.append(f"{type(exc).__name__}: {exc}")
+                detail = f"{type(exc).__name__}: {exc}"
+                self.errors.append(detail)
+                self._report(
+                    f"notification failed: channel={self.channel} event={alert.event} "
+                    f"error={detail}"
+                )
 
     def close(self) -> None:
         try:
             self._queue.put_nowait(self._STOP)
         except queue.Full:
             return
-        self._thread.join(timeout=0.2)
+        self._thread.join(timeout=self.close_timeout_seconds)
+        if self._thread.is_alive():
+            self._report("notification shutdown timed out; delivery status is unknown")
         self.delegate.close()
 
 
 class NotifyingHardware(HardwareBackend):
     """Decorate a hardware backend with optional, metadata-only notifications."""
 
-    def __init__(self, hardware: HardwareBackend, notifier: Notifier, *, device_name: str) -> None:
+    def __init__(
+        self,
+        hardware: HardwareBackend,
+        notifier: Notifier,
+        *,
+        device_name: str,
+        local_timezone: tzinfo = timezone.utc,
+        clock: Callable[[tzinfo], datetime] = datetime.now,
+    ) -> None:
         self.hardware = hardware
         self.notifier = notifier
         self.device_name = device_name
+        self.local_timezone = local_timezone
+        self.clock = clock
         self.last_notification_error: str | None = None
 
     def check_connection(self) -> None:
@@ -147,7 +236,7 @@ class NotifyingHardware(HardwareBackend):
                 event=decision.event,
                 confidence=decision.confidence or 0.0,
                 device_name=self.device_name,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=self.clock(self.local_timezone).isoformat(timespec="seconds"),
             )
             try:
                 self.notifier.notify(alert)

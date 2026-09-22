@@ -2,11 +2,13 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import tzinfo
 from functools import partial
 import os
 from pathlib import Path
 import tomllib
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from edge_ai.decision import Decision, decide
 from edge_ai.hardware.base import HardwareBackend
@@ -37,6 +39,13 @@ class ConfigError(ValueError):
 class ConfiguredPipeline:
     pipeline: Pipeline
     interval_seconds: float
+
+
+@dataclass(frozen=True)
+class ConfiguredNotifier:
+    notifier: Notifier | None
+    device_name: str
+    local_timezone: tzinfo
 
 
 @dataclass(frozen=True)
@@ -326,13 +335,29 @@ def _build_hardware(section: Mapping[str, Any]) -> HardwareBackend:
     raise ConfigError(f"unsupported [hardware].type: {component_type!r}")
 
 
-def _build_notifier(section: Mapping[str, Any]) -> tuple[Notifier | None, str]:
+def _build_notifier(
+    section: Mapping[str, Any], *, asynchronous: bool = True
+) -> ConfiguredNotifier:
     component_type = _component_type(section, "notifications")
     device_name = section.get("device_name", "Home sound monitor")
-    if not isinstance(device_name, str) or not device_name:
+    if (
+        not isinstance(device_name, str)
+        or not device_name.strip()
+        or "\n" in device_name
+        or "\r" in device_name
+    ):
         raise ConfigError("[notifications].device_name must be a non-empty string")
+    timezone_name = section.get("timezone", "UTC")
+    if not isinstance(timezone_name, str) or not timezone_name:
+        raise ConfigError("[notifications].timezone must be a non-empty string")
+    try:
+        local_timezone = ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ConfigError(
+            f"unknown [notifications].timezone: {timezone_name!r}; use an IANA name"
+        ) from exc
     if component_type == "none":
-        return None, device_name
+        return ConfiguredNotifier(None, device_name, local_timezone)
     if component_type != "smtp":
         raise ConfigError(f"unsupported [notifications].type: {component_type!r}")
 
@@ -353,7 +378,7 @@ def _build_notifier(section: Mapping[str, Any]) -> tuple[Notifier | None, str]:
     timeout_seconds = _number(section, "timeout_seconds", 5.0)
     if timeout_seconds <= 0.0:
         raise ConfigError("[notifications].timeout_seconds must be positive")
-    notifier = SMTPNotifier(
+    smtp_notifier = SMTPNotifier(
         host=_required_string(section, "host", "notifications"),
         port=port,
         sender=_required_string(section, "sender", "notifications"),
@@ -363,7 +388,15 @@ def _build_notifier(section: Mapping[str, Any]) -> tuple[Notifier | None, str]:
         starttls=_boolean(section, "starttls", True),
         timeout_seconds=timeout_seconds,
     )
-    return AsyncNotifier(notifier), device_name
+    status_log = _boolean(section, "status_log", True)
+    notifier: Notifier = smtp_notifier
+    if asynchronous:
+        notifier = AsyncNotifier(
+            smtp_notifier,
+            reporter=print if status_log else None,
+            close_timeout_seconds=timeout_seconds + 1.0,
+        )
+    return ConfiguredNotifier(notifier, device_name, local_timezone)
 
 
 def _load_document(path: Path) -> tuple[Path, Mapping[str, Any]]:
@@ -430,6 +463,12 @@ def load_hardware_check_config(path: Path) -> HardwareCheckPlan:
     )
 
 
+def load_notification_config(path: Path, *, asynchronous: bool = False) -> ConfiguredNotifier:
+    """Load only notification settings, without constructing the AI pipeline."""
+    _, document = _load_document(path)
+    return _build_notifier(_table(document, "notifications"), asynchronous=asynchronous)
+
+
 def load_config(path: Path) -> ConfiguredPipeline:
     """Load and validate a configured pipeline from ``path``."""
     config_path, document = _load_document(path)
@@ -449,9 +488,14 @@ def load_config(path: Path) -> ConfiguredPipeline:
         if notifications is not None:
             if not isinstance(notifications, dict):
                 raise ConfigError("invalid [notifications] section")
-            notifier, device_name = _build_notifier(notifications)
-            if notifier is not None:
-                hardware = NotifyingHardware(hardware, notifier, device_name=device_name)
+            configured_notifier = _build_notifier(notifications)
+            if configured_notifier.notifier is not None:
+                hardware = NotifyingHardware(
+                    hardware,
+                    configured_notifier.notifier,
+                    device_name=configured_notifier.device_name,
+                    local_timezone=configured_notifier.local_timezone,
+                )
         pipeline = Pipeline(
             input_source=input_source,
             preprocessor=preprocessor,
