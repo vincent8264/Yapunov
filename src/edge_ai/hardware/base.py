@@ -21,3 +21,7 @@ class HardwareBackend(ABC):
 
     @abstractmethod
     def apply_decision(self, decision: Decision) -> None: ...
+
+    @abstractmethod
+    def shutdown(self) -> None:
+        """Best-effort transition of known switchable outputs to a safe state."""

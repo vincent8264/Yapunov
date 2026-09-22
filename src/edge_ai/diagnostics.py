@@ -1,10 +1,7 @@
-"""Safe, explicit hardware diagnostics with machine-readable reports."""
+"""Safe, explicit hardware diagnostics."""
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-import json
-from pathlib import Path
+from dataclasses import dataclass
 import time
 
 from edge_ai.config import ActuatorCheck, HardwareCheckPlan
@@ -18,19 +15,9 @@ class CheckResult:
 
 
 @dataclass(frozen=True)
-class HardwareCheckReport:
-    schema_version: int
-    timestamp: str
+class HardwareCheckResult:
     passed: bool
     checks: tuple[CheckResult, ...]
-
-    def write_json(self, path: Path) -> None:
-        report_path = Path(path)
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(
-            json.dumps(asdict(self), indent=2) + "\n",
-            encoding="utf-8",
-        )
 
 
 def _attempt(name: str, operation: Callable[[], None]) -> CheckResult:
@@ -59,7 +46,7 @@ def run_hardware_checks(
     *,
     allow_actuators: bool = False,
     sleep: Callable[[float], None] = time.sleep,
-) -> HardwareCheckReport:
+) -> HardwareCheckResult:
     """Run configured checks and always attempt to leave switchable outputs off."""
     results = [_attempt("connection", plan.hardware.check_connection)]
 
@@ -80,13 +67,11 @@ def run_hardware_checks(
         else:
             results.append(CheckResult(name, "skipped", "requires --allow-actuators"))
 
-    cleanup = _attempt("cleanup", lambda: plan.hardware.set_led(False))
+    cleanup = _attempt("cleanup", plan.hardware.shutdown)
     if cleanup.status == "failed":
         results.append(cleanup)
 
-    return HardwareCheckReport(
-        schema_version=1,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+    return HardwareCheckResult(
         passed=all(result.status != "failed" for result in results),
         checks=tuple(results),
     )

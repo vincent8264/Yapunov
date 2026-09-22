@@ -38,3 +38,22 @@ def test_runner_stops_at_limit_and_cleans_up() -> None:
     assert "label=anomaly" in output[0]
     assert input_source.closed is True
     assert hardware.led_enabled is False
+
+
+def test_runner_checks_connection_before_reading_input() -> None:
+    class DisconnectedHardware(MockHardware):
+        def check_connection(self) -> None:
+            raise RuntimeError("offline")
+
+    input_source = CloseableInput()
+    hardware = DisconnectedHardware(verbose=False)
+    pipeline = Pipeline(input_source, lambda value: value, DummyInferenceEngine(), decide, hardware)
+
+    try:
+        run_pipeline(ConfiguredPipeline(pipeline, 0.0), max_steps=1)
+    except RuntimeError as exc:
+        assert str(exc) == "offline"
+    else:
+        raise AssertionError("connection failure was not raised")
+
+    assert input_source.closed is True

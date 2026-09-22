@@ -1,6 +1,7 @@
 """Lifecycle-aware execution for a configured pipeline."""
 
 from collections.abc import Callable
+import sys
 import time
 
 from edge_ai.config import ConfiguredPipeline
@@ -10,7 +11,7 @@ def _cleanup(configured: ConfiguredPipeline) -> None:
     hardware = configured.pipeline.hardware
     input_source = configured.pipeline.input_source
     try:
-        hardware.set_led(False)
+        hardware.shutdown()
     finally:
         close = getattr(input_source, "close", None)
         if callable(close):
@@ -29,6 +30,7 @@ def run_pipeline(
 
     steps = 0
     try:
+        configured.pipeline.hardware.check_connection()
         while max_steps is None or steps < max_steps:
             started = time.perf_counter()
             result, decision = configured.pipeline.step()
@@ -42,5 +44,13 @@ def run_pipeline(
             if delay > 0.0 and (max_steps is None or steps < max_steps):
                 time.sleep(delay)
     finally:
-        _cleanup(configured)
+        active_exception = sys.exception()
+        try:
+            _cleanup(configured)
+        except Exception as cleanup_error:
+            if active_exception is None:
+                raise
+            active_exception.add_note(
+                f"cleanup also failed: {type(cleanup_error).__name__}: {cleanup_error}"
+            )
     return steps

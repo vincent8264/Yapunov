@@ -36,12 +36,21 @@ class UnoQHardware(HardwareBackend):
     def set_pwm(self, channel: int, value: float) -> None:
         if not 0.0 <= value <= 1.0:
             raise ValueError("PWM value must be between 0.0 and 1.0")
-        self._bridge.call("set_pwm", channel, value)
+        raise RuntimeError(
+            "PWM is not enabled in the pre-event UNO Q adapter. Verify the board pin, "
+            "voltage, wiring, and Bridge endpoint before implementing it."
+        )
 
     def move_servo(self, channel: int, degrees: float) -> None:
         if not 0.0 <= degrees <= 180.0:
             raise ValueError("servo degrees must be between 0 and 180")
-        self._bridge.call("move_servo", channel, degrees)
+        raise RuntimeError(
+            "Servo control is not enabled in the pre-event UNO Q adapter. Verify the "
+            "board pin, power, travel limits, library, and Bridge endpoint first."
+        )
 
     def apply_decision(self, decision: Decision) -> None:
         self.set_led(decision.action == "alert")
+
+    def shutdown(self) -> None:
+        self.set_led(False)

@@ -141,9 +141,19 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
             not isinstance(labels, list) or not all(isinstance(label, str) for label in labels)
         ):
             raise ConfigError("[inference].labels must be an array of strings")
+        output_type = section.get("output_type")
+        if output_type != "probabilities":
+            raise ConfigError(
+                "[inference].output_type must be 'probabilities' after confirming the "
+                "model output activation; otherwise add a model-specific output adapter"
+            )
         model_path = (config_dir / model).resolve()
         try:
-            return ONNXInferenceEngine(model_path, labels=labels)
+            return ONNXInferenceEngine(
+                model_path,
+                labels=labels,
+                output_type=output_type,
+            )
         except (FileNotFoundError, ValueError) as exc:
             raise ConfigError(str(exc)) from exc
     raise ConfigError(f"unsupported [inference].type: {component_type!r}")

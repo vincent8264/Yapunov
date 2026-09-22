@@ -26,7 +26,6 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow configured PWM and servo movement",
     )
-    hardware_check.add_argument("--report", type=Path, help="write a JSON report")
     return parser
 
 
@@ -39,13 +38,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_pipeline(configured, max_steps=args.max_steps)
         else:
             plan = load_hardware_check_config(args.config)
-            report = run_hardware_checks(plan, allow_actuators=args.allow_actuators)
-            for check in report.checks:
+            result = run_hardware_checks(plan, allow_actuators=args.allow_actuators)
+            for check in result.checks:
                 print(f"{check.status.upper():7} {check.name}: {check.detail}")
-            if args.report:
-                report.write_json(args.report)
-                print(f"Report: {args.report}")
-            if not report.passed:
+            if not result.passed:
                 return 1
     except (ConfigError, RuntimeError, ValueError) as exc:
         parser.exit(2, f"error: {exc}\n")

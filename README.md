@@ -58,14 +58,16 @@ uv run edge-ai hardware-check --config configs/hardware-check.toml
 
 During the event, copy the config, select `uno_q`, and add only verified component
 checks. PWM and servo checks are skipped unless explicitly enabled with
-`--allow-actuators`. Save a machine-readable report with `--report runs/hardware.json`.
-The UNO Q Bridge and sketch endpoints still require validation on the physical board.
+`--allow-actuators`. The UNO Q Bridge and sketch endpoints still require validation
+on the physical board.
 
 ## Adding a real model
 
 1. Put the `.onnx` file in `models/`.
 2. Copy `configs/demo.toml`, set `[inference].type = "onnx"`, and add a `model`
-   path relative to that config file (for example, `../models/model.onnx`).
+   path relative to that config file (for example, `../models/model.onnx`). Set
+   `output_type = "probabilities"` only after confirming that the model includes its
+   output activation. Otherwise, add a model-specific output adapter in code.
 3. Adapt image/sensor preprocessing to the model's expected shape and dtype.
 4. If the model output is not a scalar or class-score vector, pass a model-specific `output_adapter` to `ONNXInferenceEngine`. This keeps conversion at the model boundary.
 
@@ -77,7 +79,9 @@ When the board arrives:
 
 1. Open and test `app_lab/starter_app` in Arduino App Lab.
 2. Verify the installed App Lab and Bridge API versions against the board image.
-3. Implement and test the Bridge calls in `UnoQHardware` (the current methods are deliberately guarded and untested).
+3. Implement and test only the verified Bridge calls in `UnoQHardware`. External PWM
+   and servo methods are deliberately guarded until their pins, power, endpoints, and
+   limits are known.
 4. Verify GPIO, PWM, servo pins, voltage levels, and communication with the STM32 using safe test hardware.
 5. Set `[hardware].type = "uno_q"` in the selected config; the rest of the pipeline stays unchanged.
 

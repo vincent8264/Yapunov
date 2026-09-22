@@ -39,3 +39,8 @@ class MockHardware(HardwareBackend):
         self.last_decision = decision
         self._print(f"ACTION: {decision.action}")
         self.set_led(decision.action == "alert")
+
+    def shutdown(self) -> None:
+        self.set_led(False)
+        for channel in tuple(self.pwm_values):
+            self.set_pwm(channel, 0.0)

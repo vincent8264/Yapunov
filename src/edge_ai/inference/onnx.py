@@ -19,6 +19,7 @@ class ONNXInferenceEngine(InferenceEngine):
         *,
         labels: Sequence[str] | None = None,
         output_adapter: OutputAdapter | None = None,
+        output_type: str | None = None,
     ) -> None:
         path = Path(model_path)
         if not path.is_file():
@@ -33,6 +34,11 @@ class ONNXInferenceEngine(InferenceEngine):
         self.input_name = model_inputs[0].name
         self._input_rank = len(model_inputs[0].shape)
         self._labels = tuple(labels) if labels is not None else None
+        if output_adapter is None and output_type != "probabilities":
+            raise ValueError(
+                "The generic ONNX output adapter requires output_type='probabilities'. "
+                "Confirm the model activation or provide a model-specific output_adapter."
+            )
         self._output_adapter = output_adapter or self._default_output_adapter
 
     def predict(self, data: Any) -> InferenceResult:
@@ -55,5 +61,9 @@ class ONNXInferenceEngine(InferenceEngine):
             return InferenceResult(label, float(np.clip(confidence, 0.0, 1.0)))
 
         index = int(np.argmax(scores))
+        if self._labels is not None and len(self._labels) != scores.size:
+            raise ValueError(
+                f"configured {len(self._labels)} labels for {scores.size} model scores"
+            )
         label = self._labels[index] if self._labels and index < len(self._labels) else str(index)
         return InferenceResult(label, float(np.clip(scores[index], 0.0, 1.0)))

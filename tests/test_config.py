@@ -64,3 +64,27 @@ value = 2.0
 
     with pytest.raises(ConfigError, match="value must be 0 to 1"):
         load_hardware_check_config(path)
+
+
+def test_onnx_requires_confirmed_output_type(tmp_path: Path) -> None:
+    path = tmp_path / "onnx.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sensor"
+[preprocessing]
+type = "identity"
+[inference]
+type = "onnx"
+model = "model.onnx"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="output_type"):
+        load_config(path)
