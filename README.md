@@ -252,6 +252,19 @@ uv run python scripts/package_app_lab.py
 This writes `dist/private-sound-alerts.zip`. The archive root contains `app.yaml`,
 the sketch, and a Python bundle of the random-sound demo.
 
+Before adding a microphone, validate the real bundled YAMNet model with deterministic
+WAV fixtures:
+
+```bash
+uv run python scripts/package_app_lab.py --mode yamnet-test
+```
+
+Import `dist/private-sound-alerts-yamnet-test.zip` in App Lab. This larger package
+installs ONNX Runtime and runs four bundled WAV files through the real YAMNet model.
+It should recognize the synthetic alarm and glass fixtures; the deliberately simple
+fall-like fixture currently resolves to background/silence. This is a model-loading
+and inference smoke test, not accuracy evidence, and it does not open a microphone.
+
 In Arduino App Lab, with the UNO Q connected by USB-C and its first-time setup
 already finished:
 

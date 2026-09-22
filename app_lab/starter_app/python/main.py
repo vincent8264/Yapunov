@@ -1,8 +1,8 @@
-"""Classify random synthetic sounds and show the matching UNO Q matrix icon.
+"""Run the bundled sound pipeline and show matching UNO Q matrix icons.
 
-App Lab runs this file on the board. Each loop generates one seeded random
-sound, classifies it locally, and asks the sketch to draw that event. Raw
-samples stay in this process.
+App Lab runs this file on the board. The selected package configuration either
+generates deterministic demo audio or replays bundled WAV fixtures through the
+real YAMNet model. Raw samples stay in this process.
 """
 
 from __future__ import annotations
@@ -61,6 +61,9 @@ def loop() -> None:
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     print(
         f"label={result.label} confidence={result.confidence:.3f} "
+        f"yamnet_label={result.model_label or '-'} "
+        f"yamnet_confidence="
+        f"{result.model_confidence if result.model_confidence is not None else 0.0:.3f} "
         f"action={decision.action} event={decision.event or '-'} "
         f"latency_ms={elapsed_ms:.1f}"
     )

@@ -1,0 +1,3 @@
+name: YAMNet Sound Model Test
+icon: "🧠"
+description: Run bundled synthetic WAV files through the real local YAMNet model and show matching alerts.

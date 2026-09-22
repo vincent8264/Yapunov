@@ -1,0 +1,42 @@
+# UNO Q model smoke test: replay bundled deterministic WAV fixtures through the
+# real YAMNet ONNX model. This validates model loading and inference, but it is
+# not evidence of real-world detection accuracy and does not open a microphone.
+[runtime]
+interval_seconds = 1.0
+
+[input]
+type = "wav"
+paths = [
+  "samples/background.wav",
+  "samples/smoke_alarm.wav",
+  "samples/glass_break.wav",
+  "samples/fall_thud.wav",
+]
+loop = true
+
+[preprocessing]
+type = "audio_waveform"
+sample_rate = 16000
+duration_seconds = 1.0
+peak_normalize = false
+
+[inference]
+type = "yamnet"
+model = "models/yamnet.onnx"
+background_threshold = 0.10
+
+[decision]
+type = "sound_events"
+# Smoke-test thresholds only. Recalibrate with genuine deployment recordings.
+thresholds = { smoke_alarm = 0.25, glass_break = 0.15, fall_thud = 0.20 }
+confirmations = 1
+hold_seconds = 0.0
+notification_cooldown_seconds = 60.0
+
+[hardware]
+type = "uno_q"
+
+[notifications]
+type = "none"
+device_name = "YAMNet model test"
+timezone = "America/Los_Angeles"

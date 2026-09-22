@@ -1,0 +1,5 @@
+# PyPI provides CPython 3.13 ARM64 wheels; App Lab installation still needs
+# validation on the physical UNO Q.
+numpy>=2.1
+onnxruntime==1.30.0
+tzdata>=2025.2

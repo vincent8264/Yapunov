@@ -80,3 +80,33 @@ def test_email_zip_requires_password(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="SMTP password is required"):
         _MODULE.package_app(tmp_path / "dist", notifications_config=private, password=None)
+
+
+def test_yamnet_zip_bundles_model_labels_and_synthetic_wavs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = tmp_path / "yamnet.onnx"
+    model.write_bytes(b"test-model")
+    monkeypatch.setattr(_MODULE, "YAMNET_MODEL_SOURCE", model)
+
+    zip_path = _MODULE.package_app(tmp_path / "dist", mode="yamnet-test")
+
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        config = tomllib.loads(archive.read("python/sound-uno-q.toml").decode())
+        requirements = archive.read("python/requirements.txt").decode()
+
+    assert zip_path.name == "private-sound-alerts-yamnet-test.zip"
+    archive_names = {
+        "python/models/yamnet.onnx",
+        "python/models/yamnet_class_map.csv",
+        "python/samples/background.wav",
+        "python/samples/smoke_alarm.wav",
+        "python/samples/glass_break.wav",
+        "python/samples/fall_thud.wav",
+    }
+    assert archive_names <= names
+    assert config["input"]["type"] == "wav"
+    assert config["inference"]["type"] == "yamnet"
+    assert config["inference"]["model"] == "models/yamnet.onnx"
+    assert "onnxruntime==1.30.0" in requirements
