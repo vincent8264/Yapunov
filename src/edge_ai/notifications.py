@@ -229,6 +229,9 @@ class NotifyingHardware(HardwareBackend):
     def clear_alert(self) -> None:
         self.hardware.clear_alert()
 
+    def show_spectrum(self, columns: tuple[int, ...]) -> None:
+        self.hardware.show_spectrum(columns)
+
     def apply_decision(self, decision: Decision) -> None:
         self.hardware.apply_decision(decision)
         if decision.notify and decision.event is not None:

@@ -33,7 +33,15 @@ def run_pipeline(
         configured.pipeline.hardware.check_connection()
         while max_steps is None or steps < max_steps:
             started = time.perf_counter()
-            result, decision = configured.pipeline.step()
+            step_result = configured.pipeline.step()
+            if step_result is None:
+                delay = max(configured.interval_seconds, configured.pipeline.poll_interval_seconds) - (
+                    time.perf_counter() - started
+                )
+                if delay > 0.0:
+                    time.sleep(delay)
+                continue
+            result, decision = step_result
             steps += 1
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             emit(
@@ -43,7 +51,9 @@ def run_pipeline(
                 f"action={decision.action} event={decision.event or '-'} "
                 f"notify={str(decision.notify).lower()} latency_ms={elapsed_ms:.1f}"
             )
-            delay = configured.interval_seconds - (time.perf_counter() - started)
+            delay = max(
+                configured.interval_seconds, configured.pipeline.poll_interval_seconds
+            ) - (time.perf_counter() - started)
             if delay > 0.0 and (max_steps is None or steps < max_steps):
                 time.sleep(delay)
     finally:

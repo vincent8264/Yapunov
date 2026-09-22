@@ -84,3 +84,17 @@ def test_generic_alert_falls_back_to_builtin_led() -> None:
     hardware.apply_decision(Decision("alert"))
 
     assert bridge.calls == [("set_led", True)]
+
+
+def test_spectrum_is_compact_and_does_not_overwrite_an_alert() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    hardware.show_spectrum((0, 1, 2, 3, 4, 5, 6, 7, 8, 7, 6, 5, 4))
+    hardware.show_alert("smoke_alarm")
+    hardware.show_spectrum((8,) * 13)
+
+    assert bridge.calls == [
+        ("show_spectrum", "0123456787654"),
+        ("show_alert", "smoke_alarm"),
+    ]

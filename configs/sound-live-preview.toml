@@ -1,13 +1,10 @@
-# Live local-only YAMNet configuration for the MOVO USB-M1. Download the model
-# documented in models/README.md before running. Omit `device` to use the operating
-# system's default input, or set it to the verified device name/index.
+# Desktop visual test for the live YAMNet configuration. It opens a 13x8 matrix
+# preview window; no UNO Q is required. Download models/yamnet.onnx first.
 [runtime]
 interval_seconds = 0.0
 
 [input]
 type = "microphone"
-# This verified USB microphone exposes 48 kHz capture on this laptop. The
-# waveform preprocessor below resamples each frame to YAMNet's 16 kHz input.
 sample_rate = 48000
 duration_seconds = 1.0
 device = "UAC 1.0 Microphone"
@@ -25,18 +22,15 @@ background_threshold = 0.10
 
 [decision]
 type = "sound_events"
-# Starting values only: calibrate these with genuine recordings from the deployment room.
 thresholds = { smoke_alarm = 0.25, glass_break = 0.20, fall_thud = 0.20 }
 confirmations = { smoke_alarm = 2, glass_break = 1, fall_thud = 1 }
 hold_seconds = 5.0
 notification_cooldown_seconds = 60.0
 
 [hardware]
-type = "mock"
-verbose = true
+type = "matrix_preview"
+pixel_size = 28
 
-# Capture and display independent 50 ms chunks. Their 13-band spectrum is animated
-# at 20 Hz; twenty chunks are accumulated into each unchanged YAMNet input window.
 [display]
 type = "audio_spectrum"
 rate_hz = 20

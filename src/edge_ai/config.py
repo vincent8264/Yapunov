@@ -11,8 +11,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from edge_ai.decision import Decision, decide
+from edge_ai.audio_display import AudioSpectrum
 from edge_ai.hardware.base import HardwareBackend
 from edge_ai.hardware.mock import MockHardware
+from edge_ai.hardware.matrix_preview import MatrixPreviewHardware
 from edge_ai.hardware.uno_q import UnoQHardware
 from edge_ai.inference.base import InferenceEngine, InferenceResult
 from edge_ai.inference.dummy import DummyInferenceEngine
@@ -118,7 +120,12 @@ def _required_string(section: Mapping[str, Any], key: str, section_name: str) ->
     return value
 
 
-def _build_input(section: Mapping[str, Any], config_dir: Path) -> InputSource:
+def _build_input(
+    section: Mapping[str, Any],
+    config_dir: Path,
+    *,
+    frame_duration_seconds: float | None = None,
+) -> InputSource:
     component_type = _component_type(section, "input")
     if component_type == "simulated_sensor":
         seed = section.get("seed")
@@ -161,7 +168,9 @@ def _build_input(section: Mapping[str, Any], config_dir: Path) -> InputSource:
         try:
             return MicrophoneInput(
                 sample_rate=_integer(section, "sample_rate", 16_000),
-                duration_seconds=_number(section, "duration_seconds", 1.0),
+                duration_seconds=frame_duration_seconds
+                if frame_duration_seconds is not None
+                else _number(section, "duration_seconds", 1.0),
                 device=device,
             )
         except (RuntimeError, ValueError) as exc:
@@ -184,6 +193,39 @@ def _build_input(section: Mapping[str, Any], config_dir: Path) -> InputSource:
         except ValueError as exc:
             raise ConfigError(f"invalid [input] configuration: {exc}") from exc
     raise ConfigError(f"unsupported [input].type: {component_type!r}")
+
+
+def _build_audio_spectrum(
+    document: Mapping[str, Any],
+    *,
+    input_section: Mapping[str, Any],
+    preprocessing_section: Mapping[str, Any],
+) -> AudioSpectrum | None:
+    section = document.get("display")
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise ConfigError("invalid [display] section")
+    if _component_type(section, "display") != "audio_spectrum":
+        raise ConfigError(f"unsupported [display].type: {section.get('type')!r}")
+    if _component_type(input_section, "input") != "microphone":
+        raise ConfigError("[display] audio_spectrum requires [input].type = 'microphone'")
+    if _component_type(preprocessing_section, "preprocessing") not in {
+        "audio_waveform",
+        "audio_features",
+    }:
+        raise ConfigError("[display] audio_spectrum requires audio preprocessing")
+    try:
+        return AudioSpectrum(
+            rate_hz=_integer(section, "rate_hz", 20),
+            inference_duration_seconds=_number(
+                preprocessing_section, "duration_seconds", 1.0
+            ),
+            floor_db=_number(section, "floor_db", -60.0),
+            ceiling_db=_number(section, "ceiling_db", -6.0),
+        )
+    except ValueError as exc:
+        raise ConfigError(f"invalid [display] configuration: {exc}") from exc
 
 
 def _identity(value: Any) -> Any:
@@ -344,6 +386,12 @@ def _build_hardware(section: Mapping[str, Any]) -> HardwareBackend:
         return MockHardware(verbose=verbose)
     if component_type == "uno_q":
         return UnoQHardware()
+    if component_type == "matrix_preview":
+        pixel_size = _integer(section, "pixel_size", 28)
+        try:
+            return MatrixPreviewHardware(pixel_size=pixel_size)
+        except (RuntimeError, ValueError) as exc:
+            raise ConfigError(f"invalid [hardware] matrix preview configuration: {exc}") from exc
     raise ConfigError(f"unsupported [hardware].type: {component_type!r}")
 
 
@@ -569,9 +617,18 @@ def load_config(path: Path) -> ConfiguredPipeline:
     if interval_seconds < 0.0:
         raise ConfigError("[runtime].interval_seconds must be non-negative")
 
-    input_source = _build_input(_table(document, "input"), config_path.parent)
+    input_section = _table(document, "input")
+    preprocessing_section = _table(document, "preprocessing")
+    audio_spectrum = _build_audio_spectrum(
+        document, input_section=input_section, preprocessing_section=preprocessing_section
+    )
+    input_source = _build_input(
+        input_section,
+        config_path.parent,
+        frame_duration_seconds=audio_spectrum.frame_duration_seconds if audio_spectrum else None,
+    )
     try:
-        preprocessor = _build_preprocessor(_table(document, "preprocessing"))
+        preprocessor = _build_preprocessor(preprocessing_section)
         inference = _build_inference(_table(document, "inference"), config_path.parent)
         decision_function = _build_decision(_table(document, "decision"))
         hardware = _build_hardware(_table(document, "hardware"))
@@ -593,6 +650,7 @@ def load_config(path: Path) -> ConfiguredPipeline:
             inference=inference,
             decision_function=decision_function,
             hardware=hardware,
+            audio_spectrum=audio_spectrum,
         )
     except Exception:
         close = getattr(input_source, "close", None)

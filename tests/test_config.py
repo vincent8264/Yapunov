@@ -31,6 +31,45 @@ def test_sound_demo_config_builds_audio_pipeline() -> None:
     assert isinstance(configured.pipeline.hardware, MockHardware)
 
 
+def test_live_display_uses_twenty_hz_microphone_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "display.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "microphone"
+sample_rate = 48000
+[preprocessing]
+type = "audio_waveform"
+duration_seconds = 1.0
+[inference]
+type = "dummy"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+[display]
+type = "audio_spectrum"
+rate_hz = 20
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_microphone(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("edge_ai.config.MicrophoneInput", fake_microphone)
+    configured = load_config(path)
+
+    assert configured.pipeline.audio_spectrum is not None
+    assert configured.pipeline.audio_spectrum.rate_hz == 20
+    assert captured["duration_seconds"] == 0.05
+
+
 def test_sound_decision_rejects_invalid_threshold(tmp_path: Path) -> None:
     path = tmp_path / "bad-sound.toml"
     path.write_text(

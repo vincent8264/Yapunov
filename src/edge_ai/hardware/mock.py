@@ -13,6 +13,8 @@ class MockHardware(HardwareBackend):
         self.last_decision: Decision | None = None
         self.current_alert: str | None = None
         self.alert_history: list[str] = []
+        self.spectrum_columns: tuple[int, ...] = (0,) * 13
+        self.spectrum_history: list[tuple[int, ...]] = []
 
     def _print(self, message: str) -> None:
         if self.verbose:
@@ -46,6 +48,18 @@ class MockHardware(HardwareBackend):
     def clear_alert(self) -> None:
         self.current_alert = None
         self.set_led(False)
+
+    def show_spectrum(self, columns: tuple[int, ...]) -> None:
+        if len(columns) != 13 or any(
+            isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 8
+            for value in columns
+        ):
+            raise ValueError("audio spectrum must contain 13 integer levels from 0 through 8")
+        if self.current_alert is not None:
+            return
+        self.spectrum_columns = columns
+        self.spectrum_history.append(columns)
+        self._print(f"SPECTRUM: {''.join(map(str, columns))}")
 
     def apply_decision(self, decision: Decision) -> None:
         self.last_decision = decision
