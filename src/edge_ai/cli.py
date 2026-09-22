@@ -14,6 +14,7 @@ from edge_ai.config import (
 from edge_ai.diagnostics import run_hardware_checks
 from edge_ai.notifications import AlertNotification
 from edge_ai.runner import run_pipeline
+from edge_ai.setup_server import run_setup_server
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -51,6 +52,16 @@ def _parser() -> argparse.ArgumentParser:
         default=0.95,
         help="test classifier confidence from 0 to 1 (default: 0.95)",
     )
+    setup = subparsers.add_parser(
+        "setup", help="serve the temporary local notification setup portal"
+    )
+    setup.add_argument("--config", type=Path, required=True, help="path to a TOML config")
+    setup.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="listen address; use 0.0.0.0 for access over the device LAN",
+    )
+    setup.add_argument("--port", type=int, default=8080, help="listen port (default: 8080)")
     return parser
 
 
@@ -92,8 +103,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"{check.status.upper():7} {check.name}: {check.detail}")
             if not result.passed:
                 return 1
-        else:
+        elif args.command == "test-notification":
             _send_test_notification(args.config, args.event, args.confidence)
+        else:
+            run_setup_server(args.config, host=args.host, port=args.port)
     except (ConfigError, RuntimeError, ValueError) as exc:
         parser.exit(2, f"error: {exc}\n")
     except KeyboardInterrupt:

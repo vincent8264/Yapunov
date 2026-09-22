@@ -61,3 +61,27 @@ def test_notification_command_rejects_disabled_delivery(tmp_path: Path) -> None:
         cli.main(["test-notification", "--config", str(path)])
 
     assert error.value.code == 2
+
+
+def test_setup_command_starts_local_portal(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Path, str, int]] = []
+    monkeypatch.setattr(
+        cli,
+        "run_setup_server",
+        lambda path, host, port: calls.append((path, host, port)),
+    )
+
+    result = cli.main(
+        [
+            "setup",
+            "--config",
+            "private.toml",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8123",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [(Path("private.toml"), "0.0.0.0", 8123)]

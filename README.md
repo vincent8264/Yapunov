@@ -145,6 +145,7 @@ Then edit the SMTP server, sender, recipient, device name, and timezone in
 ```toml
 [notifications]
 type = "smtp"
+settings_file = "../data/notification-settings.json"
 device_name = "Living room sound monitor"
 host = "smtp.example.com"
 port = 587
@@ -183,6 +184,36 @@ uv run edge-ai test-notification --config configs/private-live.toml --event smok
 
 The command exits with an error if delivery fails. During normal operation, successful
 and failed background deliveries are printed without exposing credentials or audio.
+
+### Local notification setup portal
+
+Once the private SMTP configuration and password environment variable are ready,
+start the temporary setup portal on the computer:
+
+```bash
+uv run edge-ai setup --config configs/private-live.toml
+```
+
+Open the printed local address. Computer-only setup on `127.0.0.1` does not require a
+PIN. When the portal is exposed over the LAN, enter the six-digit one-time PIN shown
+in the terminal. The page collects up to five comma-separated recipient emails, the
+device/room name, timezone, and whether remote notifications are enabled. **Save and
+send test** verifies SMTP delivery to every recipient before saving the preferences.
+
+When the command runs on the UNO Q, use `--host 0.0.0.0` and open the board's LAN IP
+from the setup computer:
+
+```bash
+uv run edge-ai setup --config configs/private-live.toml --host 0.0.0.0
+```
+
+The LAN PIN prevents another person on the same network from changing recipients or
+triggering a test email during setup. The portal stores only non-secret preferences in
+the configured JSON file with
+owner-only permissions. The SMTP password stays in the environment, and the portal
+stops when you press Ctrl+C. The regular `edge-ai run` command automatically uses the
+saved preferences. Persistence across an App Lab redeploy and unattended startup must
+still be verified on the physical UNO Q before field use.
 
 ## Adding the UNO Q
 
