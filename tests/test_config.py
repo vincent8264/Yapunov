@@ -11,6 +11,8 @@ from edge_ai.config import (
 from edge_ai.hardware.mock import MockHardware
 from edge_ai.inputs.audio import SimulatedSoundInput
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
+from edge_ai.notifications import SMTPNotifier
+from edge_ai.settings import NotificationPreferences, save_notification_preferences
 
 
 def test_demo_config_builds_pipeline() -> None:
@@ -206,3 +208,66 @@ def test_private_live_example_builds_email_notifier(
     assert configured.notifier is not None
     assert configured.notifier.channel == "email"
     assert configured.device_name == "Living room sound monitor"
+
+
+def test_saved_preferences_override_checked_in_notification_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "private.toml"
+    config.write_text(
+        """
+[notifications]
+type = "smtp"
+settings_file = "settings.json"
+device_name = "Default room"
+timezone = "UTC"
+host = "smtp.example.com"
+sender = "monitor@example.com"
+recipient = "default@example.com"
+username = "monitor@example.com"
+password_env = "TEST_SMTP_PASSWORD"
+""",
+        encoding="utf-8",
+    )
+    save_notification_preferences(
+        tmp_path / "settings.json",
+        NotificationPreferences(
+            "family@example.com", "Kitchen", "America/Los_Angeles", True
+        ),
+    )
+    monkeypatch.setenv("TEST_SMTP_PASSWORD", "secret")
+
+    configured = load_notification_config(config)
+
+    assert isinstance(configured.notifier, SMTPNotifier)
+    assert configured.notifier.recipient == "family@example.com"
+    assert configured.device_name == "Kitchen"
+    assert str(configured.local_timezone) == "America/Los_Angeles"
+
+
+def test_disabled_saved_preferences_do_not_require_smtp_secret(tmp_path: Path) -> None:
+    config = tmp_path / "private.toml"
+    config.write_text(
+        """
+[notifications]
+type = "smtp"
+settings_file = "settings.json"
+device_name = "Default room"
+timezone = "UTC"
+host = "smtp.example.com"
+sender = "monitor@example.com"
+recipient = "default@example.com"
+username = "monitor@example.com"
+password_env = "MISSING_TEST_SMTP_PASSWORD"
+""",
+        encoding="utf-8",
+    )
+    save_notification_preferences(
+        tmp_path / "settings.json",
+        NotificationPreferences("family@example.com", "Kitchen", "UTC", False),
+    )
+
+    configured = load_notification_config(config)
+
+    assert configured.notifier is None
+    assert configured.device_name == "Kitchen"

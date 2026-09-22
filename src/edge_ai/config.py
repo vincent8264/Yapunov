@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import tomllib
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from edge_ai.decision import Decision, decide
 from edge_ai.hardware.base import HardwareBackend
@@ -28,6 +28,11 @@ from edge_ai.notifications import AsyncNotifier, Notifier, NotifyingHardware, SM
 from edge_ai.preprocessing.audio import extract_audio_features, prepare_audio_waveform
 from edge_ai.preprocessing.image import preprocess_image
 from edge_ai.preprocessing.sensor import normalize_sensor
+from edge_ai.settings import (
+    NotificationPreferences,
+    SettingsError,
+    load_notification_preferences,
+)
 from edge_ai.sound_decision import SoundDecisionPolicy
 
 
@@ -46,6 +51,13 @@ class ConfiguredNotifier:
     notifier: Notifier | None
     device_name: str
     local_timezone: tzinfo
+
+
+@dataclass(frozen=True)
+class NotificationSetupConfig:
+    config_path: Path
+    settings_path: Path
+    preferences: NotificationPreferences
 
 
 @dataclass(frozen=True)
@@ -335,31 +347,78 @@ def _build_hardware(section: Mapping[str, Any]) -> HardwareBackend:
     raise ConfigError(f"unsupported [hardware].type: {component_type!r}")
 
 
+def _notification_settings_path(
+    section: Mapping[str, Any], config_dir: Path, *, required: bool = False
+) -> Path | None:
+    value = section.get("settings_file")
+    if value is None:
+        if required:
+            raise ConfigError("[notifications].settings_file is required for the setup portal")
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError("[notifications].settings_file must be a non-empty path")
+    return (config_dir / value).resolve()
+
+
+def _default_notification_preferences(
+    section: Mapping[str, Any], *, require_recipient: bool
+) -> NotificationPreferences:
+    device_name = section.get("device_name", "Home sound monitor")
+    timezone_name = section.get("timezone", "UTC")
+    recipient = section.get("recipient")
+    if recipient is None and not require_recipient:
+        recipient = "disabled@example.invalid"
+    enabled = section.get("enabled", True)
+    if not isinstance(device_name, str):
+        raise ConfigError("[notifications].device_name must be a string")
+    if not isinstance(timezone_name, str):
+        raise ConfigError("[notifications].timezone must be a string")
+    if not isinstance(recipient, str):
+        raise ConfigError("[notifications].recipient must be a non-empty string")
+    if not isinstance(enabled, bool):
+        raise ConfigError("[notifications].enabled must be a boolean")
+    try:
+        return NotificationPreferences(recipient, device_name, timezone_name, enabled).validated()
+    except SettingsError as exc:
+        raise ConfigError(f"invalid [notifications] preferences: {exc}") from exc
+
+
+def _effective_notification_preferences(
+    section: Mapping[str, Any], config_dir: Path, *, require_recipient: bool
+) -> NotificationPreferences:
+    defaults = _default_notification_preferences(section, require_recipient=require_recipient)
+    settings_path = _notification_settings_path(section, config_dir)
+    if settings_path is None or not settings_path.exists():
+        return defaults
+    try:
+        return load_notification_preferences(settings_path)
+    except SettingsError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
 def _build_notifier(
-    section: Mapping[str, Any], *, asynchronous: bool = True
+    section: Mapping[str, Any],
+    config_dir: Path,
+    *,
+    asynchronous: bool = True,
+    preferences_override: NotificationPreferences | None = None,
+    force_enabled: bool = False,
 ) -> ConfiguredNotifier:
     component_type = _component_type(section, "notifications")
-    device_name = section.get("device_name", "Home sound monitor")
-    if (
-        not isinstance(device_name, str)
-        or not device_name.strip()
-        or "\n" in device_name
-        or "\r" in device_name
-    ):
-        raise ConfigError("[notifications].device_name must be a non-empty string")
-    timezone_name = section.get("timezone", "UTC")
-    if not isinstance(timezone_name, str) or not timezone_name:
-        raise ConfigError("[notifications].timezone must be a non-empty string")
+    preferences = preferences_override or _effective_notification_preferences(
+        section, config_dir, require_recipient=component_type != "none"
+    )
     try:
-        local_timezone = ZoneInfo(timezone_name)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ConfigError(
-            f"unknown [notifications].timezone: {timezone_name!r}; use an IANA name"
-        ) from exc
+        preferences = preferences.validated()
+    except SettingsError as exc:
+        raise ConfigError(f"invalid notification preferences: {exc}") from exc
+    local_timezone = ZoneInfo(preferences.timezone)
     if component_type == "none":
-        return ConfiguredNotifier(None, device_name, local_timezone)
+        return ConfiguredNotifier(None, preferences.device_name, local_timezone)
     if component_type != "smtp":
         raise ConfigError(f"unsupported [notifications].type: {component_type!r}")
+    if not preferences.enabled and not force_enabled:
+        return ConfiguredNotifier(None, preferences.device_name, local_timezone)
 
     port = _integer(section, "port", 587)
     if not 1 <= port <= 65_535:
@@ -382,7 +441,7 @@ def _build_notifier(
         host=_required_string(section, "host", "notifications"),
         port=port,
         sender=_required_string(section, "sender", "notifications"),
-        recipient=_required_string(section, "recipient", "notifications"),
+        recipient=preferences.recipient,
         username=username,
         password=password,
         starttls=_boolean(section, "starttls", True),
@@ -396,7 +455,7 @@ def _build_notifier(
             reporter=print if status_log else None,
             close_timeout_seconds=timeout_seconds + 1.0,
         )
-    return ConfiguredNotifier(notifier, device_name, local_timezone)
+    return ConfiguredNotifier(notifier, preferences.device_name, local_timezone)
 
 
 def _load_document(path: Path) -> tuple[Path, Mapping[str, Any]]:
@@ -465,8 +524,40 @@ def load_hardware_check_config(path: Path) -> HardwareCheckPlan:
 
 def load_notification_config(path: Path, *, asynchronous: bool = False) -> ConfiguredNotifier:
     """Load only notification settings, without constructing the AI pipeline."""
-    _, document = _load_document(path)
-    return _build_notifier(_table(document, "notifications"), asynchronous=asynchronous)
+    config_path, document = _load_document(path)
+    return _build_notifier(
+        _table(document, "notifications"),
+        config_path.parent,
+        asynchronous=asynchronous,
+    )
+
+
+def load_notification_setup_config(path: Path) -> NotificationSetupConfig:
+    """Load editable preferences without constructing the model or requiring SMTP secrets."""
+    config_path, document = _load_document(path)
+    section = _table(document, "notifications")
+    if _component_type(section, "notifications") != "smtp":
+        raise ConfigError("the setup portal requires [notifications].type = 'smtp'")
+    settings_path = _notification_settings_path(section, config_path.parent, required=True)
+    assert settings_path is not None
+    preferences = _effective_notification_preferences(
+        section, config_path.parent, require_recipient=True
+    )
+    return NotificationSetupConfig(config_path, settings_path, preferences)
+
+
+def build_notification_test_notifier(
+    path: Path, preferences: NotificationPreferences
+) -> ConfiguredNotifier:
+    """Build a synchronous notifier for testing unsaved portal preferences."""
+    config_path, document = _load_document(path)
+    return _build_notifier(
+        _table(document, "notifications"),
+        config_path.parent,
+        asynchronous=False,
+        preferences_override=preferences,
+        force_enabled=True,
+    )
 
 
 def load_config(path: Path) -> ConfiguredPipeline:
@@ -488,7 +579,7 @@ def load_config(path: Path) -> ConfiguredPipeline:
         if notifications is not None:
             if not isinstance(notifications, dict):
                 raise ConfigError("invalid [notifications] section")
-            configured_notifier = _build_notifier(notifications)
+            configured_notifier = _build_notifier(notifications, config_path.parent)
             if configured_notifier.notifier is not None:
                 hardware = NotifyingHardware(
                     hardware,

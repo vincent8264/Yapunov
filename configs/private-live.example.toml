@@ -35,11 +35,15 @@ verbose = true
 
 [notifications]
 type = "smtp"
+# The setup portal writes only recipient preferences here; SMTP secrets never do.
+settings_file = "../data/notification-settings.json"
 device_name = "Living room sound monitor"
 timezone = "America/Los_Angeles"
 host = "smtp.example.com"
 port = 587
 sender = "monitor@example.com"
+# Add as many as five comma-separated addresses, for example:
+# recipient = "family@example.com, neighbor@example.com"
 recipient = "family@example.com"
 username = "monitor@example.com"
 password_env = "EDGE_AI_SMTP_PASSWORD"

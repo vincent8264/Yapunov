@@ -128,7 +128,7 @@ def test_smtp_notifier_sends_rendered_metadata_only_email(
         host="smtp.example.com",
         port=587,
         sender="monitor@example.com",
-        recipient="family@example.com",
+        recipient="family@example.com, neighbor@example.com",
         username="monitor@example.com",
         password="secret",
     )
@@ -145,6 +145,7 @@ def test_smtp_notifier_sends_rendered_metadata_only_email(
     assert len(sent) == 1
     message = sent[0]
     assert "possible fall-like impact" in str(message["Subject"]).lower()
+    assert str(message["To"]) == "family@example.com, neighbor@example.com"
     assert "88.0%" in message.get_content()
     assert "no audio left the device" in message.get_content()
 
