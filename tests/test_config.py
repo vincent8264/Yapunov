@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from edge_ai.config import ConfigError, load_config, load_hardware_check_config
+from edge_ai.config import (
+    ConfigError,
+    load_config,
+    load_hardware_check_config,
+    load_notification_config,
+)
 from edge_ai.hardware.mock import MockHardware
 from edge_ai.inputs.audio import SimulatedSoundInput
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
@@ -149,3 +154,55 @@ type = "mock"
 
     with pytest.raises(ConfigError, match="YAMNet ONNX model not found"):
         load_config(path)
+
+
+def test_notification_config_loads_without_pipeline_sections(tmp_path: Path) -> None:
+    path = tmp_path / "notifications.toml"
+    path.write_text(
+        """
+[notifications]
+type = "smtp"
+device_name = "Living room"
+timezone = "America/Los_Angeles"
+host = "smtp.example.com"
+sender = "monitor@example.com"
+recipient = "family@example.com"
+starttls = true
+status_log = true
+""",
+        encoding="utf-8",
+    )
+
+    configured = load_notification_config(path)
+
+    assert configured.notifier is not None
+    assert configured.notifier.channel == "email"
+    assert configured.device_name == "Living room"
+    assert str(configured.local_timezone) == "America/Los_Angeles"
+
+
+def test_unknown_notification_timezone_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "notifications.toml"
+    path.write_text(
+        """
+[notifications]
+type = "none"
+timezone = "Mars/Olympus_Mons"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="unknown.*timezone"):
+        load_notification_config(path)
+
+
+def test_private_live_example_builds_email_notifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("EDGE_AI_SMTP_PASSWORD", "test-only-password")
+
+    configured = load_notification_config(Path("configs/private-live.example.toml"))
+
+    assert configured.notifier is not None
+    assert configured.notifier.channel == "email"
+    assert configured.device_name == "Living room sound monitor"

@@ -7,3 +7,4 @@ __pycache__/
 !models/README.md
 .DS_Store
 Thumbs.db
+/configs/private-live.toml

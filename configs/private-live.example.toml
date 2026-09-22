@@ -1,0 +1,48 @@
+# Copy this file to `private-live.toml` and replace the example SMTP addresses.
+# `private-live.toml` is ignored by Git. Keep the password out of this file and
+# provide it through the EDGE_AI_SMTP_PASSWORD environment variable instead.
+[runtime]
+interval_seconds = 0.0
+
+[input]
+type = "microphone"
+sample_rate = 16000
+duration_seconds = 1.0
+
+[preprocessing]
+type = "audio_waveform"
+sample_rate = 16000
+duration_seconds = 1.0
+peak_normalize = false
+
+[inference]
+type = "yamnet"
+model = "../models/yamnet.onnx"
+background_threshold = 0.10
+
+[decision]
+# Starting values only: calibrate these with genuine recordings from the room.
+type = "sound_events"
+thresholds = { smoke_alarm = 0.25, glass_break = 0.20, fall_thud = 0.20 }
+confirmations = { smoke_alarm = 2, glass_break = 1, fall_thud = 1 }
+hold_seconds = 3.0
+notification_cooldown_seconds = 60.0
+
+[hardware]
+# Change to "uno_q" only after verifying the physical board and Bridge setup.
+type = "mock"
+verbose = true
+
+[notifications]
+type = "smtp"
+device_name = "Living room sound monitor"
+timezone = "America/Los_Angeles"
+host = "smtp.example.com"
+port = 587
+sender = "monitor@example.com"
+recipient = "family@example.com"
+username = "monitor@example.com"
+password_env = "EDGE_AI_SMTP_PASSWORD"
+starttls = true
+timeout_seconds = 5.0
+status_log = true

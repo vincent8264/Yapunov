@@ -38,3 +38,4 @@ verbose = true
 [notifications]
 type = "none"
 device_name = "Home sound monitor"
+timezone = "America/Los_Angeles"
