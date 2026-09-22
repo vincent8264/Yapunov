@@ -60,10 +60,12 @@ def test_wav_input_downmixes_stereo_pcm(tmp_path: Path) -> None:
 
 
 class _FakeArduinoMicrophone:
-    def __init__(self, chunks: list[np.ndarray | None], *, sample_rate: int) -> None:
+    def __init__(
+        self, chunks: list[np.ndarray | None], *, sample_rate: int, channels: int = 1
+    ) -> None:
         self.chunks = list(chunks)
         self.sample_rate = sample_rate
-        self.channels = 1
+        self.channels = channels
         self.started = False
         self.stopped = False
 
@@ -110,6 +112,35 @@ def test_arduino_microphone_uses_the_rate_the_device_opened() -> None:
 
     assert source.sample_rate == 48
     assert source.read().samples.shape == (48,)
+
+
+def test_arduino_microphone_flattens_mono_column_chunks() -> None:
+    fake = _FakeArduinoMicrophone(
+        [np.full((4, 1), 0.25, dtype=np.float32)], sample_rate=8
+    )
+    source = ArduinoMicrophoneInput(
+        sample_rate=8, duration_seconds=0.5, microphone_factory=lambda **_: fake
+    )
+
+    frame = source.read()
+
+    assert frame.samples.shape == (4,)
+    assert np.allclose(frame.samples, 0.25)
+
+
+def test_arduino_microphone_downmixes_interleaved_stereo() -> None:
+    fake = _FakeArduinoMicrophone(
+        [np.array([[1.0, -1.0], [0.5, 0.5]], dtype=np.float32)],
+        sample_rate=2,
+        channels=2,
+    )
+    source = ArduinoMicrophoneInput(
+        sample_rate=2, duration_seconds=1.0, microphone_factory=lambda **_: fake
+    )
+
+    frame = source.read()
+
+    assert frame.samples.tolist() == pytest.approx([0.0, 0.5])
 
 
 def test_arduino_microphone_times_out_without_audio() -> None:

@@ -260,10 +260,18 @@ class ArduinoMicrophoneInput(InputSource):
                     raise RuntimeError("App Lab microphone returned no audio before the timeout")
                 time.sleep(0.005)
                 continue
-            samples = _pcm_to_float(chunk)
+            # App Lab microphone implementations may return mono audio as either
+            # ``[frames]`` or ``[frames, 1]``. Flatten before buffering so both forms,
+            # along with interleaved multi-channel PCM, follow the same path.
+            samples = _pcm_to_float(chunk).reshape(-1)
             if self.channels > 1:
                 samples = samples[: samples.size - samples.size % self.channels]
                 samples = samples.reshape(-1, self.channels).mean(axis=1)
+            if samples.size == 0:
+                if time.monotonic() > deadline:
+                    raise RuntimeError("App Lab microphone returned no audio before the timeout")
+                time.sleep(0.005)
+                continue
             chunks.append(samples)
             collected += samples.size
             deadline = time.monotonic() + self.read_timeout_seconds
