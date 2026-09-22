@@ -69,6 +69,56 @@ def resample_audio(
     return output
 
 
+def resample_audio_frame(frame: AudioFrame, *, sample_rate: int = 16_000) -> np.ndarray:
+    """Return the complete mono frame at ``sample_rate`` without padding or trimming."""
+    if not isinstance(frame, AudioFrame):
+        raise TypeError("audio preprocessing requires an AudioFrame")
+    if isinstance(sample_rate, bool) or sample_rate < 1:
+        raise ValueError("sample_rate must be positive")
+
+    return resample_audio(
+        frame.samples,
+        source_rate=frame.sample_rate,
+        target_rate=sample_rate,
+    )
+
+
+class SlidingAudioWindow:
+    """Build an overlapping fixed-size waveform from smaller captured audio chunks."""
+
+    def __init__(
+        self,
+        *,
+        sample_rate: int = 16_000,
+        window_seconds: float = 1.0,
+        peak_normalize: bool = False,
+    ) -> None:
+        if isinstance(sample_rate, bool) or sample_rate < 1:
+            raise ValueError("sample_rate must be positive")
+        if window_seconds <= 0.0:
+            raise ValueError("window_seconds must be positive")
+        self.sample_rate = sample_rate
+        self.window_samples = round(sample_rate * window_seconds)
+        self.peak_normalize = peak_normalize
+        self._samples = np.empty(0, dtype=np.float32)
+
+    def __call__(self, frame: AudioFrame) -> np.ndarray:
+        chunk = resample_audio_frame(frame, sample_rate=self.sample_rate)
+        self._samples = np.concatenate((self._samples, chunk))[-self.window_samples :]
+        if self._samples.size < self.window_samples:
+            output = np.pad(
+                self._samples,
+                (self.window_samples - self._samples.size, 0),
+            )
+        else:
+            output = self._samples.copy()
+        if self.peak_normalize:
+            peak = float(np.max(np.abs(output)))
+            if peak > 0.0:
+                output /= peak
+        return np.clip(output, -1.0, 1.0).astype(np.float32, copy=False)
+
+
 def prepare_audio_waveform(
     frame: AudioFrame,
     *,
@@ -84,13 +134,7 @@ def prepare_audio_waveform(
     if duration_seconds <= 0.0:
         raise ValueError("duration_seconds must be positive")
 
-    samples = frame.samples
-    if frame.sample_rate != sample_rate:
-        samples = resample_audio(
-            samples,
-            source_rate=frame.sample_rate,
-            target_rate=sample_rate,
-        )
+    samples = resample_audio_frame(frame, sample_rate=sample_rate)
 
     required = round(sample_rate * duration_seconds)
     if samples.size < required:

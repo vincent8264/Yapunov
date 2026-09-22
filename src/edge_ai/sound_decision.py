@@ -46,8 +46,7 @@ class SoundDecisionPolicy:
         self.hold_seconds = hold_seconds
         self.notification_cooldown_seconds = notification_cooldown_seconds
         self._clock = clock
-        self._candidate: str | None = None
-        self._candidate_count = 0
+        self._candidate_counts = dict.fromkeys(thresholds, 0)
         self._active_event: str | None = None
         self._active_confidence: float | None = None
         self._active_until = -math.inf
@@ -55,15 +54,20 @@ class SoundDecisionPolicy:
 
     def __call__(self, result: InferenceResult) -> Decision:
         now = self._clock()
+        evaluated_events = result.evaluated_events
+        if evaluated_events is None:
+            evaluated_events = tuple(self.thresholds)
+        for event in evaluated_events:
+            if event in self._candidate_counts and event != result.label:
+                self._candidate_counts[event] = 0
         threshold = self.thresholds.get(result.label)
         if threshold is not None and result.confidence >= threshold:
-            if result.label == self._candidate:
-                self._candidate_count += 1
-            else:
-                self._candidate = result.label
-                self._candidate_count = 1
+            self._candidate_counts[result.label] += 1
 
-            if self._candidate_count >= self.confirmations_by_event[result.label]:
+            if (
+                self._candidate_counts[result.label]
+                >= self.confirmations_by_event[result.label]
+            ):
                 self._active_event = result.label
                 self._active_confidence = result.confidence
                 self._active_until = now + self.hold_seconds
@@ -79,8 +83,8 @@ class SoundDecisionPolicy:
                 )
             return self._held_decision(now)
 
-        self._candidate = None
-        self._candidate_count = 0
+        if result.label in self._candidate_counts:
+            self._candidate_counts[result.label] = 0
         return self._held_decision(now)
 
     def _held_decision(self, now: float) -> Decision:

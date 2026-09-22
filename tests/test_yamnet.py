@@ -85,6 +85,12 @@ def test_yamnet_maps_audioset_classes_to_project_events(
     assert result.confidence == pytest.approx(0.9)
     assert result.model_label == f"class_{class_index}"
     assert result.model_confidence == pytest.approx(0.9)
+    assert result.source == "yamnet"
+    assert set(result.evaluated_events or ()) == {
+        "smoke_alarm",
+        "glass_break",
+        "fall_thud",
+    }
     assert session.feeds is not None
     assert session.feeds["waveform"].shape == (16_000,)
     assert session.feeds["waveform"].dtype == np.float32
@@ -125,3 +131,25 @@ def test_yamnet_rejects_an_invalid_scores_shape(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"\[frames, 521\]"):
         engine.predict(np.zeros(16_000, dtype=np.float32))
+
+
+def test_yamnet_returns_ranked_raw_classes(tmp_path: Path) -> None:
+    scores = np.zeros((2, 521), dtype=np.float32)
+    scores[0, 42] = 0.6
+    scores[1, 42] = 0.4
+    scores[1, 7] = 0.8
+    engine, _ = build_engine(tmp_path, scores)
+
+    classes = engine.top_classes(np.zeros(16_000, dtype=np.float32), limit=2)
+
+    assert classes == (
+        ("class_7", pytest.approx(0.8)),
+        ("class_42", pytest.approx(0.6)),
+    )
+
+
+def test_yamnet_rejects_invalid_top_class_limit(tmp_path: Path) -> None:
+    engine, _ = build_engine(tmp_path, np.zeros((1, 521), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="between 1 and 521"):
+        engine.top_classes(np.zeros(16_000, dtype=np.float32), limit=0)

@@ -85,3 +85,46 @@ def test_setup_command_starts_local_portal(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert result == 0
     assert calls == [(Path("private.toml"), "0.0.0.0", 8123)]
+
+
+def test_inspect_audio_command_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Path, Path, Path, int]] = []
+    monkeypatch.setattr(cli, "_inspect_audio", lambda *args: calls.append(args))
+
+    result = cli.main(
+        [
+            "inspect-audio",
+            "sample.wav",
+            "--model",
+            "yamnet.onnx",
+            "--class-map",
+            "labels.csv",
+            "--top-k",
+            "4",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [(Path("sample.wav"), Path("yamnet.onnx"), Path("labels.csv"), 4)]
+
+
+def test_evaluate_keyword_command_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Path, Path, float, int]] = []
+    monkeypatch.setattr(cli, "_evaluate_keyword", lambda *args: calls.append(args))
+
+    result = cli.main(
+        [
+            "evaluate-keyword",
+            "--dataset",
+            "clips",
+            "--model",
+            "help.onnx",
+            "--threshold",
+            "0.7",
+            "--positive-index",
+            "0",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [(Path("clips"), Path("help.onnx"), 0.7, 0)]

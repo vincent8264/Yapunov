@@ -78,6 +78,43 @@ def test_policy_requires_confirmation_keys_to_match_thresholds() -> None:
         raise AssertionError("incomplete confirmation mapping was accepted")
 
 
+def test_detector_specific_background_only_resets_its_own_candidates() -> None:
+    policy = SoundDecisionPolicy(
+        {"smoke_alarm": 0.8, "help_call": 0.5},
+        confirmations={"smoke_alarm": 2, "help_call": 2},
+        hold_seconds=0.0,
+    )
+
+    first_alarm = policy(
+        InferenceResult(
+            "smoke_alarm",
+            0.9,
+            source="yamnet",
+            evaluated_events=("smoke_alarm",),
+        )
+    )
+    keyword_negative = policy(
+        InferenceResult(
+            "background",
+            0.9,
+            source="keyword_spotter",
+            evaluated_events=("help_call",),
+        )
+    )
+    confirmed_alarm = policy(
+        InferenceResult(
+            "smoke_alarm",
+            0.9,
+            source="yamnet",
+            evaluated_events=("smoke_alarm",),
+        )
+    )
+
+    assert first_alarm.action == "idle"
+    assert keyword_negative.action == "idle"
+    assert confirmed_alarm.event == "smoke_alarm"
+
+
 def test_policy_rejects_unsafe_threshold() -> None:
     try:
         SoundDecisionPolicy({"smoke_alarm": 1.1})

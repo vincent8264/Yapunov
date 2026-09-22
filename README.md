@@ -4,8 +4,9 @@ This project detects safety-relevant sounds without a camera or cloud audio. Aud
 captured and classified locally; only an event name, confidence, device name, and
 timestamp can leave the device when optional email notifications are enabled.
 
-The initial event set is smoke alarm, breaking glass, and a fall-like thud. Three
-distinct 8x8 icons are centered on the UNO Q's onboard 8x13 LED matrix.
+The event set is smoke alarm, breaking glass, a fall-like thud, and an optional
+spoken `help` keyword detector. Four distinct 8x8 icons are centered on the UNO Q's
+onboard 8x13 LED matrix.
 
 ## Architecture
 
@@ -83,6 +84,20 @@ desktop preview (close its window or press Ctrl+C to stop):
 uv run edge-ai run --config configs/sound-live-preview.toml
 ```
 
+To see what the unmodified YAMNet model thinks a recording contains, independently
+of the project's three-event mapping, run:
+
+```bash
+uv run edge-ai inspect-audio sample.wav \
+  --model models/yamnet.onnx \
+  --class-map models/yamnet_class_map.csv \
+  --top-k 10
+```
+
+This prints YAMNet's raw AudioSet labels and scores. It is useful for examining
+speech, alarms, impacts, and confusing household sounds, but YAMNet does not detect
+the meaning of the word `help`.
+
 If the microphone is not the default, add its verified name or index as `device` in
 the `[input]` section. On Linux, the `sounddevice` package also requires the system's
 PortAudio runtime.
@@ -141,6 +156,47 @@ mono waveform and reduces the model's 521 AudioSet outputs into the three projec
 events. Before a field demo, evaluate it on genuine recordings from the MOVO
 microphone and deployment room and record its confusion matrix and thresholds.
 ONNX Runtime telemetry is explicitly disabled before model sessions are created.
+
+## Optional `help` keyword spotting
+
+`configs/help-live.example.toml` adds a dedicated local keyword model without running
+two microphone streams. The microphone contributes a 200 ms chunk to one rolling
+one-second waveform on each step. The keyword detector runs on every step; YAMNet
+runs every third step. The models run sequentially so their peak CPU work does not
+overlap. Each detector's latency is included in runner output as `keyword_ms` and,
+when scheduled, `environment_ms`.
+
+The repository supplies and tests the scheduler and ONNX adapter, but does **not**
+include or claim a trained `help` model. Before using the example config, supply
+`models/help-kws.onnx` with the exact contract documented in `models/README.md`, then
+measure latency on the UNO Q and tune `environment_every_steps` if inference falls
+behind the 200 ms capture cadence.
+
+Build a held-out test set with short PCM WAV clips in this layout:
+
+```text
+keyword-test/
+  help_call/
+    speaker-a-01.wav
+  background/
+    conversation-01.wav
+```
+
+Include multiple speakers, distances, room noise, television speech, and hard
+negatives such as “health” and “hello.” Keep training speakers out of this folder.
+Evaluate the same exported model and threshold used by the device with:
+
+```bash
+uv run edge-ai evaluate-keyword \
+  --dataset keyword-test \
+  --model models/help-kws.onnx \
+  --threshold 0.5
+```
+
+The command reports TP/FP/TN/FN, precision, recall, and accuracy. The clips are
+resampled to 16 kHz and padded or trimmed to one second. Accuracy alone is not enough
+for this use case; separately inspect false negatives and television/conversation
+false positives before enabling family notifications.
 
 ## Sound event policy
 

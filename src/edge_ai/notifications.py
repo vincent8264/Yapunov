@@ -46,6 +46,11 @@ _EVENT_COPY: Final[dict[str, tuple[str, str, str]]] = {
         "A possible fall-like impact was detected",
         "Please contact the resident.",
     ),
+    "help_call": (
+        "Urgent: possible call for help detected",
+        "A possible spoken call for help was detected",
+        "Please contact the resident immediately.",
+    ),
 }
 
 

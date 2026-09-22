@@ -19,6 +19,9 @@ constexpr uint8_t ICON_GLASS[8] = {
 constexpr uint8_t ICON_FALL[8] = {
   0x18, 0x18, 0x3C, 0x18, 0x38, 0x4C, 0x86, 0xFF
 };
+constexpr uint8_t ICON_HELP[8] = {
+  0xC3, 0xC3, 0xC3, 0xFF, 0xFF, 0xC3, 0xC3, 0xC3
+};
 
 void draw_icon(const uint8_t rows[8]) {
   uint8_t frame[104] = {0};
@@ -47,6 +50,8 @@ String show_alert(String event) {
     draw_icon(ICON_GLASS);
   } else if (event == "fall_thud") {
     draw_icon(ICON_FALL);
+  } else if (event == "help_call") {
+    draw_icon(ICON_HELP);
   } else {
     return String("unsupported event");
   }

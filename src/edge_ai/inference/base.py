@@ -11,6 +11,9 @@ class InferenceResult:
     confidence: float
     model_label: str | None = None
     model_confidence: float | None = None
+    source: str | None = None
+    evaluated_events: tuple[str, ...] | None = None
+    timings_ms: tuple[tuple[str, float], ...] = ()
 
 
 class InferenceEngine(ABC):

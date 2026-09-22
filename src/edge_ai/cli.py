@@ -12,7 +12,12 @@ from edge_ai.config import (
     load_notification_config,
 )
 from edge_ai.diagnostics import run_hardware_checks
+from edge_ai.evaluation import evaluate_keyword_dataset
+from edge_ai.inference.keyword import KeywordSpotterInferenceEngine
+from edge_ai.inference.yamnet import YAMNetInferenceEngine
+from edge_ai.inputs.audio import read_wav
 from edge_ai.notifications import AlertNotification
+from edge_ai.preprocessing.audio import resample_audio_frame
 from edge_ai.runner import run_pipeline
 from edge_ai.setup_server import run_setup_server
 
@@ -42,7 +47,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     test_notification.add_argument(
         "--event",
-        choices=("smoke_alarm", "glass_break", "fall_thud"),
+        choices=("smoke_alarm", "glass_break", "fall_thud", "help_call"),
         default="smoke_alarm",
         help="preset alert to send (default: smoke_alarm)",
     )
@@ -62,6 +67,41 @@ def _parser() -> argparse.ArgumentParser:
         help="listen address; use 0.0.0.0 for access over the device LAN",
     )
     setup.add_argument("--port", type=int, default=8080, help="listen port (default: 8080)")
+    inspect_audio = subparsers.add_parser(
+        "inspect-audio", help="show raw YAMNet AudioSet predictions for one WAV file"
+    )
+    inspect_audio.add_argument("audio", type=Path, help="PCM WAV file to inspect")
+    inspect_audio.add_argument("--model", type=Path, required=True, help="YAMNet ONNX model")
+    inspect_audio.add_argument(
+        "--class-map", type=Path, required=True, help="YAMNet class-map CSV"
+    )
+    inspect_audio.add_argument(
+        "--top-k", type=int, default=10, help="number of raw classes to print"
+    )
+    evaluate_keyword = subparsers.add_parser(
+        "evaluate-keyword", help="evaluate a help keyword model on labeled WAV clips"
+    )
+    evaluate_keyword.add_argument(
+        "--dataset",
+        type=Path,
+        required=True,
+        help="folder containing help_call/ and background/ WAV files",
+    )
+    evaluate_keyword.add_argument(
+        "--model", type=Path, required=True, help="help keyword ONNX model"
+    )
+    evaluate_keyword.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="help probability threshold (default: 0.5)",
+    )
+    evaluate_keyword.add_argument(
+        "--positive-index",
+        type=int,
+        default=1,
+        help="help class index for multi-score outputs (default: 1)",
+    )
     return parser
 
 
@@ -89,6 +129,38 @@ def _send_test_notification(config: Path, event: str, confidence: float) -> None
     print(f"Test notification delivered: channel={configured.notifier.channel} event={event}")
 
 
+def _inspect_audio(audio: Path, model: Path, class_map: Path, top_k: int) -> None:
+    frame = read_wav(audio)
+    waveform = resample_audio_frame(frame, sample_rate=16_000)
+    engine = YAMNetInferenceEngine(model, class_map_path=class_map)
+    for rank, (label, confidence) in enumerate(
+        engine.top_classes(waveform, limit=top_k), start=1
+    ):
+        print(f"{rank:2d}. {label:<40} {confidence:.3f}")
+
+
+def _evaluate_keyword(
+    dataset: Path,
+    model: Path,
+    threshold: float,
+    positive_index: int,
+) -> None:
+    engine = KeywordSpotterInferenceEngine(
+        model,
+        activation_threshold=threshold,
+        positive_index=positive_index,
+    )
+    result = evaluate_keyword_dataset(dataset, engine)
+    print(
+        f"clips={result.total} TP={result.true_positive} FP={result.false_positive} "
+        f"TN={result.true_negative} FN={result.false_negative}"
+    )
+    print(
+        f"precision={result.precision:.3f} recall={result.recall:.3f} "
+        f"accuracy={result.accuracy:.3f}"
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -105,8 +177,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 1
         elif args.command == "test-notification":
             _send_test_notification(args.config, args.event, args.confidence)
-        else:
+        elif args.command == "setup":
             run_setup_server(args.config, host=args.host, port=args.port)
+        elif args.command == "inspect-audio":
+            _inspect_audio(args.audio, args.model, args.class_map, args.top_k)
+        else:
+            _evaluate_keyword(
+                args.dataset,
+                args.model,
+                args.threshold,
+                args.positive_index,
+            )
     except (ConfigError, RuntimeError, ValueError) as exc:
         parser.exit(2, f"error: {exc}\n")
     except KeyboardInterrupt:

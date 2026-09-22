@@ -4,8 +4,8 @@ import wave
 import numpy as np
 import pytest
 
-from edge_ai.inference.spectral import SpectralSoundInferenceEngine
 from edge_ai.audio_display import AudioSpectrum
+from edge_ai.inference.spectral import SpectralSoundInferenceEngine
 from edge_ai.inputs.audio import (
     ArduinoMicrophoneInput,
     AudioFrame,
@@ -13,7 +13,12 @@ from edge_ai.inputs.audio import (
     SimulatedSoundInput,
     WavAudioInput,
 )
-from edge_ai.preprocessing.audio import extract_audio_features, prepare_audio_waveform
+from edge_ai.preprocessing.audio import (
+    SlidingAudioWindow,
+    extract_audio_features,
+    prepare_audio_waveform,
+    resample_audio_frame,
+)
 
 
 def test_waveform_resamples_and_pads_to_exact_shape() -> None:
@@ -40,6 +45,27 @@ def test_downsampling_preserves_passband_and_rejects_aliases() -> None:
         1 / np.sqrt(2), rel=0.02
     )
     assert np.sqrt(np.mean(np.square(rejected[64:-64]))) < 0.01
+
+
+def test_sliding_audio_window_reuses_overlapping_history() -> None:
+    window = SlidingAudioWindow(sample_rate=4, window_seconds=1.0)
+
+    first = window(AudioFrame(np.array([0.1, 0.2], dtype=np.float32), 4))
+    second = window(AudioFrame(np.array([0.3, 0.4], dtype=np.float32), 4))
+    third = window(AudioFrame(np.array([0.5, 0.6], dtype=np.float32), 4))
+
+    assert first == pytest.approx([0.0, 0.0, 0.1, 0.2])
+    assert second == pytest.approx([0.1, 0.2, 0.3, 0.4])
+    assert third == pytest.approx([0.3, 0.4, 0.5, 0.6])
+
+
+def test_resample_audio_frame_keeps_full_duration() -> None:
+    frame = AudioFrame(np.array([0.0, 0.5, -0.5, 0.0], dtype=np.float32), 4)
+
+    waveform = resample_audio_frame(frame, sample_rate=8)
+
+    assert waveform.shape == (8,)
+    assert waveform.dtype == np.float32
 
 
 def test_wav_input_downmixes_stereo_pcm(tmp_path: Path) -> None:

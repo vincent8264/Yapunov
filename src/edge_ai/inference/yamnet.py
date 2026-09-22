@@ -116,6 +116,42 @@ class YAMNetInferenceEngine(InferenceEngine):
         self.class_labels = tuple(class_labels)
 
     def predict(self, data: Any) -> InferenceResult:
+        scores = self._predict_scores(data)
+
+        raw_index = int(np.argmax(scores))
+        raw_frame, raw_class_index = np.unravel_index(raw_index, scores.shape)
+        raw_confidence = float(np.clip(scores[raw_frame, raw_class_index], 0.0, 1.0))
+        raw_label = self.class_labels[raw_class_index]
+
+        event_scores = {
+            event: float(np.max(scores[:, indices]))
+            for event, indices in self.event_class_indices.items()
+        }
+        event, confidence = max(event_scores.items(), key=lambda item: item[1])
+        confidence = float(np.clip(confidence, 0.0, 1.0))
+        common = {
+            "model_label": raw_label,
+            "model_confidence": raw_confidence,
+            "source": "yamnet",
+            "evaluated_events": tuple(self.event_class_indices),
+        }
+        if confidence < self.background_threshold:
+            return InferenceResult("background", 1.0 - confidence, **common)
+        return InferenceResult(event, confidence, **common)
+
+    def top_classes(self, data: Any, *, limit: int = 5) -> tuple[tuple[str, float], ...]:
+        """Return the strongest raw AudioSet classes, aggregated over model frames."""
+        if isinstance(limit, bool) or not 1 <= limit <= self.CLASS_COUNT:
+            raise ValueError("YAMNet top-class limit must be between 1 and 521")
+        scores = self._predict_scores(data)
+        aggregated = np.max(scores, axis=0)
+        indices = np.argsort(aggregated)[::-1][:limit]
+        return tuple(
+            (self.class_labels[int(index)], float(np.clip(aggregated[index], 0.0, 1.0)))
+            for index in indices
+        )
+
+    def _predict_scores(self, data: Any) -> np.ndarray:
         waveform = np.asarray(data, dtype=np.float32)
         if waveform.ndim != 1 or waveform.size == 0:
             raise ValueError("YAMNet input must be a non-empty rank-1 waveform")
@@ -135,28 +171,4 @@ class YAMNetInferenceEngine(InferenceEngine):
             )
         if not np.all(np.isfinite(scores)):
             raise ValueError("YAMNet scores must contain only finite values")
-
-        raw_index = int(np.argmax(scores))
-        raw_frame, raw_class_index = np.unravel_index(raw_index, scores.shape)
-        raw_confidence = float(np.clip(scores[raw_frame, raw_class_index], 0.0, 1.0))
-        raw_label = self.class_labels[raw_class_index]
-
-        event_scores = {
-            event: float(np.max(scores[:, indices]))
-            for event, indices in self.event_class_indices.items()
-        }
-        event, confidence = max(event_scores.items(), key=lambda item: item[1])
-        confidence = float(np.clip(confidence, 0.0, 1.0))
-        if confidence < self.background_threshold:
-            return InferenceResult(
-                "background",
-                1.0 - confidence,
-                model_label=raw_label,
-                model_confidence=raw_confidence,
-            )
-        return InferenceResult(
-            event,
-            confidence,
-            model_label=raw_label,
-            model_confidence=raw_confidence,
-        )
+        return scores

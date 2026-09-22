@@ -56,8 +56,8 @@ Scores are multi-label probabilities rather than a softmax distribution. The liv
 configuration's thresholds are unvalidated starting points, not safety claims.
 
 The runner prints both `label` (the project event or `background`, which drives the
-alert policy) and `yamnet_label`/`yamnet_confidence` (the highest raw AudioSet score).
-The latter is diagnostic only and never triggers hardware or notifications.
+alert policy) and `model_label`/`model_confidence` (the highest raw model result).
+The latter is diagnostic only and never triggers hardware or notifications by itself.
 
 Before the field demo, validate genuine MOVO USB-M1 recordings at different ranges,
 ordinary household noise, television playback, dishes, doors, dropped objects, and
@@ -66,3 +66,27 @@ representative UNO Q latency, and the final threshold values here.
 
 The repository's `spectral_demo` engine is only a deterministic integration baseline
 for simulated audio. It must not be used to claim real-world detection accuracy.
+
+## Planned help keyword model contract
+
+No trained keyword checkpoint is selected or committed yet. Do not use
+`configs/help-live.example.toml` for a safety claim until a real model has been
+selected, documented, and evaluated. The `KeywordSpotterInferenceEngine` deliberately
+accepts only a small, explicit ONNX boundary:
+
+- Local filename expected by the example config: `help-kws.onnx` (git-ignored).
+- Input: exactly one rank-1 `[samples]` or rank-2 `[1, samples]` `float32` raw-waveform
+  input. The configured pipeline supplies one second of mono 16 kHz PCM in `[-1, 1]`.
+- Output: exactly one tensor containing either one `help` probability or a class-score
+  vector. For a vector, `positive_index` identifies `help` (default index 1).
+- Output values must already include sigmoid/softmax activation and be probabilities
+  in `[0, 1]`; logits are rejected.
+- Runtime label mapping: probability at or above `activation_threshold` becomes
+  `help_call`; lower probability becomes `background`.
+
+When selecting or training the model, add its source URL, immutable revision/hash,
+license, training label order, precise tensor names/shapes, preprocessing, export
+steps, SHA-256, held-out results, and measured UNO Q latency to this section. A model
+from a framework such as openWakeWord is not automatically compatible with this raw
+waveform contract; either export the complete frontend and classifier as one ONNX
+graph or add a tested framework-specific adapter.

@@ -4,10 +4,10 @@ from edge_ai.hardware.icons import ICONS, icon_rows, render_icon
 
 
 def test_every_sound_event_has_a_distinct_8x8_icon() -> None:
-    events = ("smoke_alarm", "glass_break", "fall_thud")
+    events = ("smoke_alarm", "glass_break", "fall_thud", "help_call")
     rows = [icon_rows(event) for event in events]
 
-    assert len(set(rows)) == 3
+    assert len(set(rows)) == 4
     assert all(len(item) == 8 for item in rows)
     assert all(0 <= row <= 255 for item in rows for row in item)
     assert all(len(line) == 8 for event in events for line in ICONS[event])

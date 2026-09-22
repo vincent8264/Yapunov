@@ -258,6 +258,57 @@ type = "mock"
         load_config(path)
 
 
+def test_scheduled_audio_requires_both_detector_tables(tmp_path: Path) -> None:
+    path = tmp_path / "scheduled.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sound"
+events = ["background"]
+[preprocessing]
+type = "audio_sliding_window"
+[inference]
+type = "scheduled_audio"
+[decision]
+type = "sound_events"
+thresholds = { help_call = 0.5 }
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match=r"\[inference.environment\].*tables"):
+        load_config(path)
+
+
+def test_keyword_spotter_reports_missing_model_at_startup(tmp_path: Path) -> None:
+    path = tmp_path / "keyword.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sound"
+events = ["background"]
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "keyword_spotter"
+model = "missing.onnx"
+[decision]
+type = "sound_events"
+thresholds = { help_call = 0.5 }
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="keyword ONNX model not found"):
+        load_config(path)
+
+
 def test_notification_config_loads_without_pipeline_sections(tmp_path: Path) -> None:
     path = tmp_path / "notifications.toml"
     path.write_text(

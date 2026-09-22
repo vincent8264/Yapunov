@@ -29,7 +29,11 @@ from edge_ai.inputs.base import InputSource
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
 from edge_ai.pipeline import Pipeline
 from edge_ai.notifications import AsyncNotifier, Notifier, NotifyingHardware, SMTPNotifier
-from edge_ai.preprocessing.audio import extract_audio_features, prepare_audio_waveform
+from edge_ai.preprocessing.audio import (
+    SlidingAudioWindow,
+    extract_audio_features,
+    prepare_audio_waveform,
+)
 from edge_ai.preprocessing.sensor import normalize_sensor
 from edge_ai.settings import (
     NotificationPreferences,
@@ -266,7 +270,7 @@ def _build_preprocessor(section: Mapping[str, Any]) -> Callable[[Any], Any]:
         from edge_ai.preprocessing.image import preprocess_image
 
         return partial(preprocess_image, size=(size[0], size[1]), normalize=normalize)
-    if component_type in {"audio_waveform", "audio_features"}:
+    if component_type in {"audio_waveform", "audio_features", "audio_sliding_window"}:
         sample_rate = _integer(section, "sample_rate", 16_000)
         duration_seconds = _number(section, "duration_seconds", 1.0)
         if sample_rate < 1:
@@ -278,6 +282,12 @@ def _build_preprocessor(section: Mapping[str, Any]) -> Callable[[Any], Any]:
                 prepare_audio_waveform,
                 sample_rate=sample_rate,
                 duration_seconds=duration_seconds,
+                peak_normalize=_boolean(section, "peak_normalize", False),
+            )
+        if component_type == "audio_sliding_window":
+            return SlidingAudioWindow(
+                sample_rate=sample_rate,
+                window_seconds=duration_seconds,
                 peak_normalize=_boolean(section, "peak_normalize", False),
             )
         return partial(
@@ -339,6 +349,39 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
             )
         except (FileNotFoundError, ValueError) as exc:
             raise ConfigError(str(exc)) from exc
+    if component_type == "keyword_spotter":
+        model = section.get("model")
+        if not isinstance(model, str) or not model:
+            raise ConfigError("[inference].model must be a non-empty path")
+        from edge_ai.inference.keyword import KeywordSpotterInferenceEngine
+
+        try:
+            return KeywordSpotterInferenceEngine(
+                (config_dir / model).resolve(),
+                activation_threshold=_number(section, "activation_threshold", 0.5),
+                positive_index=_integer(section, "positive_index", 1),
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise ConfigError(str(exc)) from exc
+    if component_type == "scheduled_audio":
+        environment = section.get("environment")
+        keyword = section.get("keyword")
+        if not isinstance(environment, dict) or not isinstance(keyword, dict):
+            raise ConfigError(
+                "[inference.environment] and [inference.keyword] must be tables"
+            )
+        from edge_ai.inference.scheduled import ScheduledAudioInferenceEngine
+
+        try:
+            return ScheduledAudioInferenceEngine(
+                _build_inference(environment, config_dir),
+                _build_inference(keyword, config_dir),
+                environment_every_steps=_integer(
+                    section, "environment_every_steps", 3
+                ),
+            )
+        except ValueError as exc:
+            raise ConfigError(f"invalid [inference] configuration: {exc}") from exc
     raise ConfigError(f"unsupported [inference].type: {component_type!r}")
 
 

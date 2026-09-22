@@ -44,12 +44,18 @@ def run_pipeline(
             result, decision = step_result
             steps += 1
             elapsed_ms = (time.perf_counter() - started) * 1000.0
+            detector_timings = "".join(
+                f" {name}_ms={latency_ms:.1f}"
+                for name, latency_ms in result.timings_ms
+            )
             emit(
                 f"step={steps} label={result.label} confidence={result.confidence:.3f} "
-                f"yamnet_label={result.model_label or '-'} "
-                f"yamnet_confidence={result.model_confidence if result.model_confidence is not None else 0.0:.3f} "
+                f"source={result.source or '-'} model_label={result.model_label or '-'} "
+                "model_confidence="
+                f"{result.model_confidence if result.model_confidence is not None else 0.0:.3f} "
                 f"action={decision.action} event={decision.event or '-'} "
                 f"notify={str(decision.notify).lower()} latency_ms={elapsed_ms:.1f}"
+                f"{detector_timings}"
             )
             delay = max(
                 configured.interval_seconds, configured.pipeline.poll_interval_seconds
