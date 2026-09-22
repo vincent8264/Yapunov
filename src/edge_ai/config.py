@@ -17,7 +17,12 @@ from edge_ai.hardware.uno_q import UnoQHardware
 from edge_ai.inference.base import InferenceEngine, InferenceResult
 from edge_ai.inference.dummy import DummyInferenceEngine
 from edge_ai.inference.spectral import SpectralSoundInferenceEngine
-from edge_ai.inputs.audio import MicrophoneInput, SimulatedSoundInput, WavAudioInput
+from edge_ai.inputs.audio import (
+    ArduinoMicrophoneInput,
+    MicrophoneInput,
+    SimulatedSoundInput,
+    WavAudioInput,
+)
 from edge_ai.inputs.base import InputSource
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
 from edge_ai.pipeline import Pipeline
@@ -150,14 +155,17 @@ def _build_input(section: Mapping[str, Any], config_dir: Path) -> InputSource:
             )
         except ValueError as exc:
             raise ConfigError(f"invalid [input] configuration: {exc}") from exc
-    if component_type == "microphone":
+    if component_type in {"microphone", "arduino_microphone"}:
         device = section.get("device")
         if device is not None and (
             isinstance(device, bool) or not isinstance(device, (str, int))
         ):
             raise ConfigError("[input].device must be a device name or integer index")
+        microphone_type = (
+            MicrophoneInput if component_type == "microphone" else ArduinoMicrophoneInput
+        )
         try:
-            return MicrophoneInput(
+            return microphone_type(
                 sample_rate=_integer(section, "sample_rate", 16_000),
                 duration_seconds=_number(section, "duration_seconds", 1.0),
                 device=device,

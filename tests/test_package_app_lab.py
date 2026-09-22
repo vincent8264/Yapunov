@@ -74,6 +74,81 @@ def test_email_zip_bundles_password_file_outside_config(tmp_path: Path) -> None:
     assert configured.notifier.recipient == "family@example.com"
 
 
+_LIVE_CONFIG = """
+[runtime]
+[input]
+type = "arduino_microphone"
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "yamnet"
+model = "../models/yamnet.onnx"
+[decision]
+type = "default"
+[hardware]
+type = "uno_q"
+[notifications]
+type = "none"
+"""
+
+
+def _live_config(tmp_path: Path) -> Path:
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "yamnet.onnx").write_bytes(b"model-bytes")
+    (models / "yamnet_class_map.csv").write_text("index,mid,display_name\n", encoding="utf-8")
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    config = configs / "live.toml"
+    config.write_text(_LIVE_CONFIG, encoding="utf-8")
+    return config
+
+
+def test_live_zip_bundles_model_and_onnxruntime(tmp_path: Path) -> None:
+    zip_path = _MODULE.package_app(tmp_path / "dist", config_path=_live_config(tmp_path))
+
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        board_config = tomllib.loads(archive.read("python/sound-uno-q.toml").decode())
+        requirements = archive.read("python/requirements.txt").decode()
+        manifest = archive.read("app.yaml").decode()
+
+    assert zip_path.name == "private-sound-alerts-live.zip"
+    assert "python/models/yamnet.onnx" in names
+    assert "python/models/yamnet_class_map.csv" in names
+    assert board_config["inference"]["model"] == "models/yamnet.onnx"
+    assert "onnxruntime" in requirements
+    assert "(live mic)" in manifest
+
+
+def test_simulated_input_model_zip_is_not_labelled_live(tmp_path: Path) -> None:
+    config = _live_config(tmp_path)
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            'type = "arduino_microphone"', 'type = "simulated_sound"'
+        ),
+        encoding="utf-8",
+    )
+
+    zip_path = _MODULE.package_app(tmp_path / "dist", config_path=config)
+
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        manifest = archive.read("app.yaml").decode()
+
+    assert zip_path.name == "private-sound-alerts-yamnet-sim.zip"
+    assert "python/models/yamnet.onnx" in names
+    assert "(YAMNet, simulated mic)" in manifest
+
+
+def test_live_zip_reports_missing_model(tmp_path: Path) -> None:
+    config = _live_config(tmp_path)
+    (tmp_path / "models" / "yamnet.onnx").unlink()
+
+    with pytest.raises(ValueError, match="model not found"):
+        _MODULE.package_app(tmp_path / "dist", config_path=config)
+
+
 def test_email_zip_requires_password(tmp_path: Path) -> None:
     private = tmp_path / "private.toml"
     private.write_text(_PRIVATE_CONFIG, encoding="utf-8")

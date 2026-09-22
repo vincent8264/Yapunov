@@ -1,7 +1,7 @@
-"""Classify random synthetic sounds and show the matching UNO Q matrix icon.
+"""Classify sound on the UNO Q and show the matching matrix icon.
 
-App Lab runs this file on the board. Each loop generates one seeded random
-sound, classifies it locally, and asks the sketch to draw that event. Raw
+App Lab runs this file on the board. The bundled ``sound-uno-q.toml`` selects the
+input (random synthetic sounds or the USB microphone) and the classifier. Raw
 samples stay in this process.
 """
 
@@ -61,6 +61,7 @@ def loop() -> None:
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     print(
         f"label={result.label} confidence={result.confidence:.3f} "
+        f"model_label={result.model_label or '-'} "
         f"action={decision.action} event={decision.event or '-'} "
         f"latency_ms={elapsed_ms:.1f}"
     )

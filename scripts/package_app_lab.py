@@ -1,6 +1,8 @@
 """Build an Arduino App Lab zip that contains the sound pipeline.
 
-Pass ``--notifications`` with a private SMTP config to enable email on the board.
+Pass ``--config`` to choose the board pipeline; a model referenced by its
+``[inference]`` section is bundled under ``python/models/``. Pass
+``--notifications`` with a private SMTP config to enable email on the board.
 The SMTP password is read from that config's ``password_env`` variable and written
 only to ``python/smtp-password`` inside the git-ignored ``dist/`` output.
 """
@@ -82,21 +84,48 @@ def _board_notifications(config_path: Path, password: str | None) -> tuple[str, 
     return "\n".join(lines) + "\n", password
 
 
-def _board_config(notifications: str | None) -> str:
-    source = CONFIG_SOURCE.read_text(encoding="utf-8")
+def _board_config(source: str, config_path: Path, notifications: str | None) -> str:
     if notifications is None:
         return source
     match = re.search(r"^\[notifications\]\s*$", source, flags=re.MULTILINE)
     if match is None:
         return source.rstrip() + "\n\n" + notifications
     if re.search(r"^\[", source[match.end():], flags=re.MULTILINE):
-        raise ValueError(f"[notifications] must be the last table in {CONFIG_SOURCE}")
+        raise ValueError(f"[notifications] must be the last table in {config_path}")
     return source[: match.start()] + notifications
+
+
+def _bundled_model(source: str, config_path: Path) -> tuple[str, list[Path], bool]:
+    """Point ``[inference].model`` at ``python/models/`` and list the files to copy.
+
+    Returns the rewritten config, the model files, and whether ONNX Runtime is needed.
+    """
+    inference = tomllib.loads(source).get("inference", {})
+    model = inference.get("model") if isinstance(inference, dict) else None
+    if not isinstance(model, str):
+        return source, [], False
+    model_path = (config_path.parent / model).resolve()
+    if not model_path.is_file():
+        raise ValueError(
+            f"model not found: {model_path}. Download it as described in models/README.md"
+        )
+    files = [model_path]
+    if inference.get("type") == "yamnet":
+        class_map = model_path.with_name("yamnet_class_map.csv")
+        if not class_map.is_file():
+            raise ValueError(f"YAMNet class map not found: {class_map}")
+        files.append(class_map)
+    pattern = re.compile(r'^(model\s*=\s*)"[^"]*"', flags=re.MULTILINE)
+    rewritten, count = pattern.subn(rf'\1"models/{model_path.name}"', source, count=1)
+    if count != 1:
+        raise ValueError(f"could not rewrite [inference].model in {config_path}")
+    return rewritten, files, True
 
 
 def package_app(
     destination: Path,
     *,
+    config_path: Path = CONFIG_SOURCE,
     notifications_config: Path | None = None,
     password: str | None = None,
 ) -> Path:
@@ -107,18 +136,51 @@ def package_app(
         notifications, bundled_password = _board_notifications(
             notifications_config, password
         )
-    name = "private-sound-alerts-email" if notifications is not None else "private-sound-alerts"
+    source, model_files, needs_onnxruntime = _bundled_model(
+        config_path.read_text(encoding="utf-8"), config_path
+    )
+    board_config = _board_config(source, config_path, notifications)
+
+    input_section = tomllib.loads(source).get("input", {})
+    input_type = input_section.get("type") if isinstance(input_section, dict) else None
+    name = "private-sound-alerts"
+    title_suffixes: list[str] = []
+    if input_type in {"microphone", "arduino_microphone"}:
+        name += "-live"
+        title_suffixes.append("live mic")
+    elif model_files:
+        name += "-yamnet-sim"
+        title_suffixes.append("YAMNet, simulated mic")
+    if notifications is not None:
+        name += "-email"
+        title_suffixes.append("email")
 
     app_dir = destination / name
     if app_dir.exists():
         shutil.rmtree(app_dir)
     python_dir = app_dir / "python"
     python_dir.mkdir(parents=True)
-    shutil.copy2(APP_SOURCE / "app.yaml", app_dir / "app.yaml")
+    manifest = (APP_SOURCE / "app.yaml").read_text(encoding="utf-8")
+    if title_suffixes:
+        manifest = re.sub(
+            r"^name:\s*(.+)$",
+            lambda match: f"name: {match.group(1)} ({', '.join(title_suffixes)})",
+            manifest,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    (app_dir / "app.yaml").write_text(manifest, encoding="utf-8")
     shutil.copytree(APP_SOURCE / "sketch", app_dir / "sketch")
     shutil.copy2(APP_SOURCE / "python" / "main.py", python_dir / "main.py")
-    shutil.copy2(APP_SOURCE / "python" / "requirements.txt", python_dir / "requirements.txt")
-    (python_dir / BOARD_CONFIG_NAME).write_text(_board_config(notifications), encoding="utf-8")
+    requirements = (APP_SOURCE / "python" / "requirements.txt").read_text(encoding="utf-8")
+    if needs_onnxruntime:
+        requirements = requirements.rstrip() + "\nonnxruntime>=1.20\n"
+    (python_dir / "requirements.txt").write_text(requirements, encoding="utf-8")
+    (python_dir / BOARD_CONFIG_NAME).write_text(board_config, encoding="utf-8")
+    if model_files:
+        (python_dir / "models").mkdir()
+        for path in model_files:
+            shutil.copy2(path, python_dir / "models" / path.name)
     if bundled_password is not None:
         secret = python_dir / PASSWORD_FILE_NAME
         secret.write_text(bundled_password + "\n", encoding="utf-8")
@@ -149,6 +211,12 @@ def _password_for(config_path: Path) -> str | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
+        "--config",
+        type=Path,
+        default=CONFIG_SOURCE,
+        help="board pipeline config (default: configs/sound-uno-q.toml)",
+    )
+    parser.add_argument(
         "--notifications",
         type=Path,
         help="private SMTP config whose [notifications] section is bundled for the board",
@@ -158,6 +226,7 @@ def main() -> int:
     try:
         zip_path = package_app(
             REPO_ROOT / "dist",
+            config_path=args.config.resolve(),
             notifications_config=args.notifications,
             password=_password_for(args.notifications) if args.notifications else None,
         )

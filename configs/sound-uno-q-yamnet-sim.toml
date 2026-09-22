@@ -1,0 +1,41 @@
+# Board test with only the microphone simulated: random synthetic sounds go through
+# the real YAMNet model on the UNO Q's CPU, the real decision policy, the LED matrix
+# over Bridge, and (when packaged with --notifications) real email. Package it with
+#   uv run python scripts/package_app_lab.py --config configs/sound-uno-q-yamnet-sim.toml
+[runtime]
+interval_seconds = 1.0
+
+[input]
+type = "simulated_sound"
+events = ["background", "smoke_alarm", "glass_break", "fall_thud"]
+random = true
+sample_rate = 16000
+duration_seconds = 1.0
+seed = 7
+
+[preprocessing]
+type = "audio_waveform"
+sample_rate = 16000
+duration_seconds = 1.0
+peak_normalize = false
+
+[inference]
+type = "yamnet"
+model = "../models/yamnet.onnx"
+background_threshold = 0.10
+
+[decision]
+type = "sound_events"
+# Same thresholds as the live-microphone build so this exercises the deployed policy.
+# Synthetic clips arrive one at a time in random order, so each event confirms on one clip.
+thresholds = { smoke_alarm = 0.25, glass_break = 0.20, fall_thud = 0.20 }
+confirmations = { smoke_alarm = 1, glass_break = 1, fall_thud = 1 }
+hold_seconds = 2.0
+notification_cooldown_seconds = 60.0
+
+[hardware]
+type = "uno_q"
+
+[notifications]
+type = "none"
+device_name = "Home sound monitor"

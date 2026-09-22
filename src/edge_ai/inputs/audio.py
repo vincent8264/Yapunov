@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import queue
 import random
+import time
 import wave
 from typing import Any, Sequence
 
@@ -189,6 +190,91 @@ class MicrophoneInput(InputSource):
             self._stream.close()
 
 
+def _pcm_to_float(samples: np.ndarray) -> np.ndarray:
+    """Convert integer or float PCM samples to mono float32 in roughly ``[-1, 1]``."""
+    samples = np.asarray(samples)
+    if samples.dtype == np.int16:
+        return samples.astype(np.float32) / 32768.0
+    if samples.dtype == np.int32:
+        return samples.astype(np.float32) / 2147483648.0
+    if samples.dtype == np.uint8:
+        return (samples.astype(np.float32) - 128.0) / 128.0
+    if np.issubdtype(samples.dtype, np.floating):
+        return samples.astype(np.float32)
+    raise RuntimeError(f"unsupported microphone sample format: {samples.dtype}")
+
+
+class ArduinoMicrophoneInput(InputSource):
+    """Capture fixed-size frames through Arduino App Lab's ALSA microphone peripheral.
+
+    ``arduino.app_peripherals.microphone`` exists only inside the App Lab runtime on
+    the UNO Q, so it is imported when the input is constructed.
+    """
+
+    def __init__(
+        self,
+        *,
+        sample_rate: int = 16_000,
+        duration_seconds: float = 1.0,
+        device: str | int | None = None,
+        read_timeout_seconds: float = 3.0,
+        microphone_factory: Any | None = None,
+    ) -> None:
+        if isinstance(sample_rate, bool) or sample_rate < 1:
+            raise ValueError("microphone sample_rate must be positive")
+        if duration_seconds <= 0.0:
+            raise ValueError("microphone duration_seconds must be positive")
+        if read_timeout_seconds <= 0.0:
+            raise ValueError("microphone read timeout must be positive")
+        if microphone_factory is None:
+            try:
+                from arduino.app_peripherals.microphone import Microphone
+            except ImportError as exc:
+                raise RuntimeError(
+                    "arduino_microphone input requires the Arduino App Lab runtime on "
+                    "the UNO Q; use type = 'microphone' on a laptop"
+                ) from exc
+            microphone_factory = Microphone
+        self.duration_seconds = duration_seconds
+        self.read_timeout_seconds = read_timeout_seconds
+        self._pending = np.empty(0, dtype=np.float32)
+        try:
+            self._microphone = microphone_factory(device=device, sample_rate=sample_rate)
+            self._microphone.start()
+        except Exception as exc:
+            raise RuntimeError(f"could not open App Lab microphone {device!r}: {exc}") from exc
+        # The device may not support the requested rate; the peripheral reports the
+        # rate it actually opened, and preprocessing resamples from it.
+        self.sample_rate = int(getattr(self._microphone, "sample_rate", sample_rate))
+        self.channels = int(getattr(self._microphone, "channels", 1))
+        self.frame_count = round(self.sample_rate * duration_seconds)
+
+    def read(self) -> AudioFrame:
+        deadline = time.monotonic() + self.read_timeout_seconds
+        chunks = [self._pending]
+        collected = self._pending.size
+        while collected < self.frame_count:
+            chunk = self._microphone.capture()
+            if chunk is None:
+                if time.monotonic() > deadline:
+                    raise RuntimeError("App Lab microphone returned no audio before the timeout")
+                time.sleep(0.005)
+                continue
+            samples = _pcm_to_float(chunk)
+            if self.channels > 1:
+                samples = samples[: samples.size - samples.size % self.channels]
+                samples = samples.reshape(-1, self.channels).mean(axis=1)
+            chunks.append(samples)
+            collected += samples.size
+            deadline = time.monotonic() + self.read_timeout_seconds
+        buffered = np.concatenate(chunks)
+        self._pending = buffered[self.frame_count :]
+        return AudioFrame(buffered[: self.frame_count], self.sample_rate)
+
+    def close(self) -> None:
+        self._microphone.stop()
+
+
 class SimulatedSoundInput(InputSource):
     """Generate repeatable acoustic signatures to exercise the whole pipeline."""
 
@@ -248,8 +334,30 @@ class SimulatedSoundInput(InputSource):
             spectrum[frequencies < 2_000.0] = 0.0
             samples = np.fft.irfft(spectrum, self.sample_count) * np.exp(-7.0 * time_axis)
         else:
-            carrier = np.sin(2.0 * np.pi * 85.0 * time_axis)
-            samples = 0.9 * carrier * np.exp(-5.0 * time_axis)
+            samples = self._fall_thud(generator)
 
         peak = max(float(np.max(np.abs(samples))), 1.0)
         return AudioFrame((samples / peak).astype(np.float32), self.sample_rate)
+
+    def _fall_thud(self, generator: np.random.Generator) -> np.ndarray:
+        """Return a body-impact-like thud plus a smaller bounce.
+
+        A pure low sine is heard by YAMNet as silence, so each impact combines a
+        short click, low-passed noise, and a 77 Hz body resonance.
+        """
+        samples = np.zeros(self.sample_count)
+        for start_seconds, amplitude in ((0.15, 1.0), (0.42, 0.67)):
+            start = int(start_seconds * self.sample_rate)
+            if start >= self.sample_count:
+                break
+            count = self.sample_count - start
+            elapsed = np.arange(count) / self.sample_rate
+            spectrum = np.fft.rfft(generator.normal(0.0, 1.0, count))
+            spectrum[np.fft.rfftfreq(count, 1.0 / self.sample_rate) > 1_700.0] = 0.0
+            low_noise = np.fft.irfft(spectrum, count)
+            low_noise /= max(float(np.max(np.abs(low_noise))), 1e-9)
+            body = 0.9 * np.sin(2.0 * np.pi * 77.0 * elapsed)
+            envelope = np.exp(-9.7 * elapsed) * (1.0 - np.exp(-elapsed / 0.01))
+            click = generator.normal(0.0, 1.0, count) * np.exp(-340.0 * elapsed)
+            samples[start:] += amplitude * ((low_noise + body) * envelope + click)
+        return 0.9 * samples / max(float(np.max(np.abs(samples))), 1e-9)

@@ -23,6 +23,53 @@ def test_demo_config_builds_pipeline() -> None:
     assert isinstance(configured.pipeline.hardware, MockHardware)
 
 
+def test_arduino_microphone_input_requires_app_lab_runtime(tmp_path: Path) -> None:
+    path = tmp_path / "board-live.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "arduino_microphone"
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "spectral_demo"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="App Lab runtime"):
+        load_config(path)
+
+
+def test_arduino_microphone_rejects_invalid_device(tmp_path: Path) -> None:
+    path = tmp_path / "board-live.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "arduino_microphone"
+device = true
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "spectral_demo"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="device must be"):
+        load_config(path)
+
+
 def test_uno_q_sound_config_requires_board_runtime() -> None:
     with pytest.raises(RuntimeError, match="UnoQHardware requires"):
         load_config(Path("configs/sound-uno-q.toml"))
