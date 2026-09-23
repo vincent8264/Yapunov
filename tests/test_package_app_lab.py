@@ -31,13 +31,15 @@ starttls = true
 
 
 def test_app_lab_zip_contains_pipeline(tmp_path: Path) -> None:
-    zip_path = _MODULE.package_app(tmp_path)
+    zip_path = _MODULE.package_app(
+        tmp_path / "dist", config_path=_live_config(tmp_path / "fixture")
+    )
 
     with zipfile.ZipFile(zip_path) as archive:
         names = set(archive.namelist())
         board_config = tomllib.loads(archive.read("python/sound-uno-q.toml").decode())
 
-    assert zip_path.name == "private-sound-alerts.zip"
+    assert zip_path.name == "private-sound-alerts-live.zip"
     assert "app.yaml" in names
     assert "python/main.py" in names
     assert "python/edge_ai/__init__.py" in names
@@ -52,13 +54,16 @@ def test_email_zip_bundles_password_file_outside_config(tmp_path: Path) -> None:
     private.write_text(_PRIVATE_CONFIG, encoding="utf-8")
 
     zip_path = _MODULE.package_app(
-        tmp_path / "dist", notifications_config=private, password="test-only-secret"
+        tmp_path / "dist",
+        config_path=_live_config(tmp_path / "fixture"),
+        notifications_config=private,
+        password="test-only-secret",
     )
 
     with zipfile.ZipFile(zip_path) as archive:
         config_text = archive.read("python/sound-uno-q.toml").decode()
         secret = archive.read("python/smtp-password").decode()
-    assert zip_path.name == "private-sound-alerts-email.zip"
+    assert zip_path.name == "private-sound-alerts-live-email.zip"
     assert "test-only-secret" not in config_text
     assert secret.strip() == "test-only-secret"
     notifications = tomllib.loads(config_text)["notifications"]
@@ -67,7 +72,7 @@ def test_email_zip_bundles_password_file_outside_config(tmp_path: Path) -> None:
     assert "password_env" not in notifications
     assert tomllib.loads(config_text)["hardware"]["type"] == "uno_q"
 
-    board_python = tmp_path / "dist" / "private-sound-alerts-email" / "python"
+    board_python = tmp_path / "dist" / "private-sound-alerts-live-email" / "python"
     configured = load_notification_config(board_python / "sound-uno-q.toml")
     assert configured.notifier is not None
     assert configured.notifier.password == "test-only-secret"
@@ -94,7 +99,7 @@ type = "none"
 
 def _live_config(tmp_path: Path) -> Path:
     models = tmp_path / "models"
-    models.mkdir()
+    models.mkdir(parents=True)
     (models / "yamnet.onnx").write_bytes(b"model-bytes")
     (models / "yamnet_class_map.csv").write_text("index,mid,display_name\n", encoding="utf-8")
     configs = tmp_path / "configs"

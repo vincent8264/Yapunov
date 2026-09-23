@@ -23,13 +23,53 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_SOURCE = REPO_ROOT / "app_lab" / "starter_app"
 PACKAGE_SOURCE = REPO_ROOT / "src" / "edge_ai"
 CONFIG_SOURCE = REPO_ROOT / "configs" / "sound-uno-q.toml"
-YAMNET_CONFIG_SOURCE = REPO_ROOT / "configs" / "sound-yamnet-uno-q.toml"
 YAMNET_MODEL_SOURCE = REPO_ROOT / "models" / "yamnet.onnx"
 YAMNET_CLASS_MAP_SOURCE = REPO_ROOT / "models" / "yamnet_class_map.csv"
 BOARD_CONFIG_NAME = "sound-uno-q.toml"
 PASSWORD_FILE_NAME = "smtp-password"
 YAMNET_TEST_MODE = "yamnet-test"
 ONNXRUNTIME_REQUIREMENT = "onnxruntime==1.30.0"
+
+YAMNET_TEST_CONFIG = """# Generated UNO Q model smoke test configuration.
+[runtime]
+interval_seconds = 1.0
+
+[input]
+type = "wav"
+paths = [
+  "samples/background.wav",
+  "samples/smoke_alarm.wav",
+  "samples/glass_break.wav",
+  "samples/fall_thud.wav",
+]
+loop = true
+
+[preprocessing]
+type = "audio_waveform"
+sample_rate = 16000
+duration_seconds = 1.0
+peak_normalize = false
+
+[inference]
+type = "yamnet"
+model = "models/yamnet.onnx"
+background_threshold = 0.10
+
+[decision]
+type = "sound_events"
+thresholds = { smoke_alarm = 0.25, glass_break = 0.15, fall_thud = 0.20 }
+confirmations = 1
+hold_seconds = 0.0
+notification_cooldown_seconds = 60.0
+
+[hardware]
+type = "uno_q"
+
+[notifications]
+type = "none"
+device_name = "YAMNet model test"
+timezone = "America/Los_Angeles"
+"""
 
 _COPIED_NOTIFICATION_KEYS = (
     "device_name",
@@ -213,7 +253,7 @@ def package_app(
                 f"YAMNet model not found: {YAMNET_MODEL_SOURCE}; download it as documented"
             )
         name = "private-sound-alerts-yamnet-test"
-        board_config = YAMNET_CONFIG_SOURCE.read_text(encoding="utf-8")
+        board_config = YAMNET_TEST_CONFIG
         model_files = [YAMNET_MODEL_SOURCE, YAMNET_CLASS_MAP_SOURCE]
         manifest = (APP_SOURCE / "app-yamnet-test.yaml").read_text(encoding="utf-8")
         requirements = (APP_SOURCE / "python" / "requirements-yamnet-test.txt").read_text(

@@ -7,7 +7,7 @@ interval_seconds = 0.0
 type = "microphone"
 sample_rate = 48000
 duration_seconds = 1.0
-device = "UAC 1.0 Microphone"
+device = 11
 
 [preprocessing]
 type = "audio_waveform"
@@ -22,8 +22,8 @@ background_threshold = 0.10
 
 [decision]
 type = "sound_events"
-thresholds = { smoke_alarm = 0.25, glass_break = 0.20, fall_thud = 0.20 }
-confirmations = { smoke_alarm = 2, glass_break = 1, fall_thud = 1 }
+thresholds = { smoke_alarm = 0.50, glass_break = 0.50, fall_thud = 0.20 }
+confirmations = { smoke_alarm = 1, glass_break = 1, fall_thud = 1 }
 hold_seconds = 5.0
 notification_cooldown_seconds = 60.0
 

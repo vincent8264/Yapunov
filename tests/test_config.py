@@ -1,4 +1,5 @@
 from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -70,9 +71,13 @@ type = "mock"
         load_config(path)
 
 
-def test_uno_q_sound_config_requires_board_runtime() -> None:
-    with pytest.raises(RuntimeError, match="UnoQHardware requires"):
-        load_config(Path("configs/sound-uno-q.toml"))
+def test_uno_q_sound_config_is_live_yamnet() -> None:
+    with Path("configs/sound-uno-q.toml").open("rb") as file:
+        config = tomllib.load(file)
+
+    assert config["input"]["type"] == "arduino_microphone"
+    assert config["inference"]["type"] == "yamnet"
+    assert config["hardware"]["type"] == "uno_q"
 
 
 def test_random_sound_config_enables_random_input() -> None:
@@ -134,7 +139,7 @@ rate_hz = 20
 def test_board_microphone_display_uses_twenty_hz_chunks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = Path("configs/sound-uno-q-live.toml").read_text(encoding="utf-8")
+    source = Path("configs/sound-uno-q.toml").read_text(encoding="utf-8")
     path = tmp_path / "board-display.toml"
     path.write_text(
         source.replace('model = "../models/yamnet.onnx"\n', "")
