@@ -18,7 +18,9 @@ ort.disable_telemetry_events()
 DEFAULT_EVENT_CLASS_INDICES: Mapping[str, tuple[int, ...]] = {
     "smoke_alarm": (382, 393, 394),  # Alarm; Smoke detector; Fire alarm
     "glass_break": (435, 437, 464),  # Glass; Shatter; Breaking
-    "fall_thud": (454, 455, 460, 462, 463),  # Thud; Thunk; Bang; Whack; Crash
+    # Basketball bounce is included because genuine project thump recordings rank it
+    # strongly; this remains a fall-like impact proxy, not confirmation of a fall.
+    "fall_thud": (454, 455, 459, 460, 462, 463),
 }
 
 SessionFactory = Callable[..., Any]

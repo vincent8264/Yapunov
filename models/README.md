@@ -48,8 +48,10 @@ groups:
 
 - `smoke_alarm`: Alarm (382), Smoke detector/smoke alarm (393), Fire alarm (394)
 - `glass_break`: Glass (435), Shatter (437), Breaking (464)
-- `fall_thud`: Thump/thud (454), Thunk (455), Bang (460), Whack/thwack (462),
-  Smash/crash (463)
+- `fall_thud`: Thump/thud (454), Thunk (455), Basketball bounce (459), Bang (460),
+  Whack/thwack (462), Smash/crash (463). Basketball bounce is an empirically useful
+  impact proxy for the project's recorded thumps; actual ball bounces are therefore
+  an expected false-positive risk.
 
 `fall_thud` means a heavy impact signature, not confirmation that a person fell.
 Scores are multi-label probabilities rather than a softmax distribution. The live

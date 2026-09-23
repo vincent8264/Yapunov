@@ -34,6 +34,7 @@ pixel_size = 28
 [display]
 type = "audio_spectrum"
 rate_hz = 20
+inference_hop_seconds = 0.2
 floor_db = -60.0
 ceiling_db = -6.0
 

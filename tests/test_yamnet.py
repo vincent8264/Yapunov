@@ -68,6 +68,7 @@ def build_engine(
         (393, "smoke_alarm"),
         (437, "glass_break"),
         (454, "fall_thud"),
+        (459, "fall_thud"),
     ],
 )
 def test_yamnet_maps_audioset_classes_to_project_events(

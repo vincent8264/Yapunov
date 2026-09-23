@@ -36,10 +36,12 @@ type = "mock"
 verbose = true
 
 # Capture and display independent 50 ms chunks. Their 13-band spectrum is animated
-# at 20 Hz; twenty chunks are accumulated into each unchanged YAMNet input window.
+# at 20 Hz; after the first one-second window, YAMNet receives a rolling window every
+# 200 ms (five inferences per second).
 [display]
 type = "audio_spectrum"
 rate_hz = 20
+inference_hop_seconds = 0.2
 floor_db = -60.0
 ceiling_db = -6.0
 

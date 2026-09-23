@@ -34,9 +34,10 @@ notification_cooldown_seconds = 60.0
 type = "uno_q"
 
 [display]
-# 13-band soundwave on the matrix at 20 Hz between alerts; alert icons take priority.
+# 13-band soundwave at 20 Hz; run YAMNet on an overlapping one-second window at 5 Hz.
 type = "audio_spectrum"
 rate_hz = 20
+inference_hop_seconds = 0.2
 floor_db = -60.0
 ceiling_db = -6.0
 
