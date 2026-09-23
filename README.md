@@ -43,26 +43,6 @@ Run the hardware-free demo:
 uv run edge-ai run --config configs/demo.toml
 ```
 
-Run the deterministic three-sound integration demo:
-
-```bash
-uv run edge-ai run --config configs/sound-demo.toml --max-steps 6
-```
-
-This generates actual waveforms, extracts spectral features, classifies the three
-signatures, and records the visual decisions. Its transparent spectral rules validate
-the complete pipeline; they are not a production safety model.
-
-Pick a different synthetic sound on every step and print the 8x8 icon the matrix
-would show:
-
-```bash
-uv run edge-ai run --config configs/sound-random.toml --max-steps 6
-```
-
-This random-input demo is laptop-only. The packaged UNO Q app described under
-"Adding the UNO Q" uses the real microphone and YAMNet configuration.
-
 For live YAMNet inference, first download the model once (the application does not
 download anything at runtime):
 
@@ -78,19 +58,6 @@ and smoke-alarm download locations and licenses. The current `help-kws.onnx` is 
 real locally trained YAMNet-transfer prototype, but its held-out real-speech result is
 not good enough for emergency use; review the recorded false-positive and
 false-negative counts before enabling it.
-
-Then select the MOVO USB-M1 as the operating system's default input and run:
-
-```bash
-uv run edge-ai run --config configs/sound-live.toml
-```
-
-To see the 13×8 matrix on the PC instead of printing `MOCK` spectrum rows, use the
-desktop preview (close its window or press Ctrl+C to stop):
-
-```bash
-uv run edge-ai run --config configs/sound-live-preview.toml
-```
 
 To see what the unmodified YAMNet model thinks a recording contains, independently
 of the project's three-event mapping, run:
@@ -155,12 +122,7 @@ copies for temporary experiments:
 | --- | --- |
 | `demo.toml` | Generic, hardware-free sensor pipeline used to verify the reusable architecture. |
 | `hardware-check.toml` | Safe laptop hardware-check plan using `MockHardware`; actuator checks remain opt-in. |
-| `sound-demo.toml` | Deterministic synthetic sound sequence and transparent spectral classifier for integration testing. |
-| `sound-random.toml` | Randomized version of the synthetic spectral demo for repeated laptop testing. |
-| `sound-live.toml` | Live USB microphone and YAMNet with mock output and the terminal spectrum display. |
-| `sound-live-preview.toml` | Live USB microphone and YAMNet with the desktop matrix preview; use this for threshold tuning. |
 | `sound-uno-q.toml` | Canonical UNO Q deployment: board microphone input, YAMNet, decision policy, and real matrix output. This is the only committed UNO Q pipeline config. |
-| `help-uno-q-live.toml` | Combined UNO Q environmental-sound and optional `help` keyword workflow for hardware integration testing. |
 | `private-live.example.toml` | Template for a private SMTP-enabled configuration. Copy it to ignored `private-live.toml` and never commit credentials. |
 | `help-live.example.toml` | Optional scheduled YAMNet plus `help` keyword configuration; it requires a separately validated keyword model. |
 
@@ -397,28 +359,12 @@ the board on Wi-Fi. The first start also needs internet to install `onnxruntime`
 log prints YAMNet's top AudioSet label on each line (`model_label=Alarm`), which helps
 tune the thresholds in the live config.
 
-After locally building `models/help-kws.onnx`, package the combined environmental
-sound and spoken-help pipeline with:
-
-```bash
-uv run python scripts/package_app_lab.py --config configs/help-uno-q-live.toml
-```
-
-The packager rewrites and includes both nested model paths, includes YAMNet's class
-map, and installs ONNX Runtime. Import the resulting
-`dist/private-sound-alerts-live.zip` in App Lab. It listens to 0.2-second microphone
-chunks, maintains a one-second sliding window, checks the help model every step, and
-runs the environmental classifier every third step. This is ready for hardware
-integration testing, not unattended safety use.
-
 To send email from the board as well, first confirm delivery from the laptop with
 `edge-ai test-notification`, then build the email variant:
 
 ```bash
 export EDGE_AI_SMTP_PASSWORD='your-smtp-app-password'
-uv run python scripts/package_app_lab.py \
-  --config configs/help-uno-q-live.toml \
-  --notifications configs/private-live.toml
+uv run python scripts/package_app_lab.py --notifications configs/private-live.toml
 ```
 
 This writes `dist/private-sound-alerts-live-email.zip`. The same private configuration

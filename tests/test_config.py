@@ -10,7 +10,6 @@ from edge_ai.config import (
     load_notification_config,
 )
 from edge_ai.hardware.mock import MockHardware
-from edge_ai.inputs.audio import SimulatedSoundInput
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
 from edge_ai.notifications import SMTPNotifier
 from edge_ai.settings import NotificationPreferences, save_notification_preferences
@@ -78,23 +77,6 @@ def test_uno_q_sound_config_is_live_yamnet() -> None:
     assert config["input"]["type"] == "arduino_microphone"
     assert config["inference"]["type"] == "yamnet"
     assert config["hardware"]["type"] == "uno_q"
-
-
-def test_random_sound_config_enables_random_input() -> None:
-    configured = load_config(Path("configs/sound-random.toml"))
-    source = configured.pipeline.input_source
-
-    assert isinstance(source, SimulatedSoundInput)
-    assert source.choose_randomly is True
-    assert isinstance(configured.pipeline.hardware, MockHardware)
-
-
-def test_sound_demo_config_builds_audio_pipeline() -> None:
-    configured = load_config(Path("configs/sound-demo.toml"))
-
-    assert configured.interval_seconds == 0.35
-    assert isinstance(configured.pipeline.input_source, SimulatedSoundInput)
-    assert isinstance(configured.pipeline.hardware, MockHardware)
 
 
 def test_live_display_uses_twenty_hz_microphone_chunks(
