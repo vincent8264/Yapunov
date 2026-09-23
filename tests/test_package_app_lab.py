@@ -1,5 +1,6 @@
 from pathlib import Path
 import importlib.util
+import sys
 import tomllib
 import zipfile
 
@@ -219,6 +220,46 @@ def test_packager_rejects_empty_literal_password(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="non-empty"):
         _MODULE._password_for(private)
+
+
+def test_main_uses_local_private_config_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    private = tmp_path / "private-live.toml"
+    private.write_text(_PRIVATE_CONFIG + '\npassword = "test-only-secret"\n', encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_package_app(destination: Path, **kwargs: object) -> Path:
+        captured.update(destination=destination, **kwargs)
+        return destination / "app.zip"
+
+    monkeypatch.setattr(_MODULE, "DEFAULT_NOTIFICATIONS_CONFIG", private)
+    monkeypatch.setattr(_MODULE, "package_app", fake_package_app)
+    monkeypatch.setattr(sys, "argv", ["package_app_lab.py"])
+
+    assert _MODULE.main() == 0
+    assert captured["notifications_config"] == private
+    assert captured["password"] == "test-only-secret"
+
+
+def test_yamnet_test_mode_does_not_use_local_private_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    private = tmp_path / "private-live.toml"
+    private.write_text(_PRIVATE_CONFIG + '\npassword = "test-only-secret"\n', encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_package_app(destination: Path, **kwargs: object) -> Path:
+        captured.update(destination=destination, **kwargs)
+        return destination / "app.zip"
+
+    monkeypatch.setattr(_MODULE, "DEFAULT_NOTIFICATIONS_CONFIG", private)
+    monkeypatch.setattr(_MODULE, "package_app", fake_package_app)
+    monkeypatch.setattr(sys, "argv", ["package_app_lab.py", "--mode", "yamnet-test"])
+
+    assert _MODULE.main() == 0
+    assert captured["notifications_config"] is None
+    assert captured["password"] is None
 
 
 def test_yamnet_zip_bundles_model_labels_and_synthetic_wavs(

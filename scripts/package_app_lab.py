@@ -1,9 +1,11 @@
 """Build an Arduino App Lab zip that contains the sound pipeline.
 
 Pass ``--config`` to choose the board pipeline; models referenced anywhere below
-its ``[inference]`` section are bundled under ``python/models/``. Pass
-``--notifications`` with a private SMTP config to enable email on the board, or
-``--mode yamnet-test`` to replay bundled WAV fixtures through YAMNet.
+its ``[inference]`` section are bundled under ``python/models/``. For normal
+packages, an ignored ``configs/private-live.toml`` is used automatically when it
+exists; pass ``--no-notifications`` to make a non-email package. Use
+``--notifications`` to select another private SMTP config, or ``--mode yamnet-test``
+to replay bundled WAV fixtures through YAMNet.
 The SMTP password is read from the ignored private config's local ``password`` value,
 or from its ``password_env`` variable, and written only to ``python/smtp-password``
 inside the git-ignored ``dist/`` output. The literal password is never copied into the
@@ -25,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_SOURCE = REPO_ROOT / "app_lab" / "starter_app"
 PACKAGE_SOURCE = REPO_ROOT / "src" / "edge_ai"
 CONFIG_SOURCE = REPO_ROOT / "configs" / "sound-uno-q.toml"
+DEFAULT_NOTIFICATIONS_CONFIG = REPO_ROOT / "configs" / "private-live.toml"
 YAMNET_MODEL_SOURCE = REPO_ROOT / "models" / "yamnet.onnx"
 YAMNET_CLASS_MAP_SOURCE = REPO_ROOT / "models" / "yamnet_class_map.csv"
 BOARD_CONFIG_NAME = "sound-uno-q.toml"
@@ -345,6 +348,13 @@ def _password_for(config_path: Path) -> str | None:
     return os.environ.get(name) if isinstance(name, str) else None
 
 
+def _default_notifications_config(mode: str, disabled: bool) -> Path | None:
+    """Use the local SMTP settings for deployable apps, never for model tests."""
+    if disabled or mode == YAMNET_TEST_MODE or not DEFAULT_NOTIFICATIONS_CONFIG.is_file():
+        return None
+    return DEFAULT_NOTIFICATIONS_CONFIG
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -359,25 +369,35 @@ def main() -> int:
         help="private SMTP config whose [notifications] section is bundled for the board",
     )
     parser.add_argument(
+        "--no-notifications",
+        action="store_true",
+        help="do not bundle the local private SMTP configuration",
+    )
+    parser.add_argument(
         "--mode",
         choices=("demo", YAMNET_TEST_MODE),
         default="demo",
         help="package the default demo or the bundled YAMNet model smoke test",
     )
     args = parser.parse_args()
+    if args.notifications is not None and args.no_notifications:
+        parser.error("--notifications and --no-notifications cannot be used together")
+    notifications_config = args.notifications or _default_notifications_config(
+        args.mode, args.no_notifications
+    )
     sys.path.insert(0, str(REPO_ROOT / "src"))
     try:
         zip_path = package_app(
             REPO_ROOT / "dist",
             mode=args.mode,
             config_path=args.config.resolve(),
-            notifications_config=args.notifications,
-            password=_password_for(args.notifications) if args.notifications else None,
+            notifications_config=notifications_config,
+            password=_password_for(notifications_config) if notifications_config else None,
         )
     except (OSError, ValueError) as exc:
         parser.exit(2, f"error: {exc}\n")
     print(zip_path)
-    if args.notifications is not None:
+    if notifications_config is not None:
         print("This zip contains the SMTP password. Import it only on your own board; do not share it.")
     return 0
 

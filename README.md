@@ -359,8 +359,12 @@ App Lab deploys one app, not this repository. Build that app, then import the zi
 uv run python scripts/package_app_lab.py
 ```
 
-This writes `dist/private-sound-alerts-live.zip`. The archive root contains
-`app.yaml`, the sketch, the live UNO Q configuration, YAMNet and its class map.
+When `configs/private-live.toml` exists, this writes the email-enabled
+`dist/private-sound-alerts-live-email.zip`; it contains that file's SMTP settings and
+password. Keep the archive private. Without the private config, it writes
+`dist/private-sound-alerts-live.zip`. The archive root contains `app.yaml`, the
+sketch, the live UNO Q configuration, YAMNet, and its class map. To deliberately
+build the non-email archive while the private config exists, add `--no-notifications`.
 
 Before adding a microphone, validate the real bundled YAMNet model with deterministic
 WAV fixtures:
@@ -417,12 +421,15 @@ uv run python scripts/package_app_lab.py \
   --notifications configs/private-live.toml
 ```
 
-This writes `dist/private-sound-alerts-live-email.zip`. It copies the `[notifications]`
-settings into the board config and stores the password in `python/smtp-password`,
-because App Lab does not pass laptop environment variables to the board. That zip
-contains the secret: import it only on your own UNO Q and never upload it to the
-project page. The board must be on Wi-Fi with outbound SMTP allowed. Email runs in the
-background, so a failed send is logged and never blocks the matrix alert.
+This writes `dist/private-sound-alerts-live-email.zip`. The same private configuration
+is selected automatically for normal packages when it exists; `--notifications` is
+only needed to choose a different private config. The packager copies the
+`[notifications]` settings into the board config and stores the password in
+`python/smtp-password`, because App Lab does not pass laptop environment variables to
+the board. That zip contains the secret: import it only on your own UNO Q and never
+upload it to the project page. The board must be on Wi-Fi with outbound SMTP allowed.
+Email runs in the background, so a failed send is logged and never blocks the matrix
+alert.
 
 The sketch uses the documented onboard matrix library and no external pins. Confirm
 the installed App Lab, Bridge, and `Arduino_LED_Matrix` versions on the board, and

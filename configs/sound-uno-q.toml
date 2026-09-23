@@ -28,7 +28,7 @@ type = "sound_events"
 thresholds = { smoke_alarm = 0.50, glass_break = 0.50, fall_thud = 0.20 }
 confirmations = { smoke_alarm = 1, glass_break = 1, fall_thud = 1 }
 hold_seconds = 5.0
-notification_cooldown_seconds = 60.0
+notification_cooldown_seconds = 30.0
 
 [hardware]
 type = "uno_q"
