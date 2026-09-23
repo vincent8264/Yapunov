@@ -145,6 +145,20 @@ or stalled input, but they do not prove that the microphone hardware is broken. 
 zero-level threshold deliberately avoids guessing the noise floor before measurements
 are taken on the event microphone; increase it only after room calibration.
 
+After a runtime fault, the pipeline remains alive and displays a crossed-microphone
+icon. It tries to recreate the microphone input every two seconds. Recovery requires
+a usable nonzero frame; a frozen-input recovery also requires the next frame to
+change. With SMTP notifications enabled, the first fault sends one metadata-only
+warning, the matrix status column lights after delivery, and a later recovery sends
+one follow-up email. Repeated retry failures do not generate duplicate messages.
+
+For the physical demo, start with the live spectrum visible, unplug only the USB
+microphone, and leave the UNO Q and powered hub connected. Verify the fault icon and
+warning email, reconnect the microphone, make a short sound, and verify that the
+spectrum and inference resume before checking the recovery email. USB removal and
+re-enumeration still require validation against the App Lab version and event hardware;
+do not claim reconnection until this exact sequence has passed on the board.
+
 Stop it with Ctrl+C, or run a fixed number of iterations:
 
 ```bash

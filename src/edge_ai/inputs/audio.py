@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 import queue
@@ -53,32 +54,93 @@ class MicrophoneHealthInput(InputSource):
         self,
         source: InputSource,
         *,
+        source_factory: Callable[[], InputSource] | None = None,
         failure_seconds: float = 5.0,
         silence_threshold: float = 0.0,
         detect_frozen: bool = True,
+        retry_interval_seconds: float = 2.0,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if failure_seconds <= 0.0:
             raise ValueError("microphone health failure_seconds must be positive")
         if not 0.0 <= silence_threshold <= 1.0:
             raise ValueError("microphone health silence_threshold must be between 0 and 1")
-        self.source = source
+        if retry_interval_seconds <= 0.0:
+            raise ValueError("microphone health retry_interval_seconds must be positive")
+        self.source: InputSource | None = source
+        self.source_factory = source_factory
         self.failure_seconds = failure_seconds
         self.silence_threshold = silence_threshold
         self.detect_frozen = detect_frozen
+        self.retry_interval_seconds = retry_interval_seconds
+        self._clock = clock
         self._silent_seconds = 0.0
         self._frozen_seconds = 0.0
         self._previous: AudioFrame | None = None
+        self._fault: MicrophoneHealthError | None = None
+        self._recovered_reason: str | None = None
+        self._next_retry_at = 0.0
+
+    def _close_source(self, *, suppress_errors: bool) -> None:
+        if self.source is None:
+            return
+        close = getattr(self.source, "close", None)
+        try:
+            if callable(close):
+                close()
+        except Exception:
+            # A disconnected capture device can also fail during close. The read
+            # failure remains the useful diagnosis and retries must still continue.
+            if not suppress_errors:
+                raise
+        finally:
+            self.source = None
+
+    def _mark_fault(self, reason: str, message: str) -> MicrophoneHealthError:
+        fault = MicrophoneHealthError(reason, message)
+        if self._fault is None:
+            self._fault = fault
+        self._silent_seconds = 0.0
+        self._frozen_seconds = 0.0
+        self._previous = None
+        if self.source_factory is not None:
+            self._close_source(suppress_errors=True)
+            self._next_retry_at = self._clock() + self.retry_interval_seconds
+        return fault
+
+    def _ensure_source(self) -> InputSource:
+        if self.source is not None:
+            return self.source
+        if self.source_factory is None or self._fault is None:
+            raise RuntimeError("microphone input is closed")
+        if self._clock() < self._next_retry_at:
+            raise self._fault
+        try:
+            self.source = self.source_factory()
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._next_retry_at = self._clock() + self.retry_interval_seconds
+            raise MicrophoneHealthError(
+                "unavailable",
+                f"microphone reconnect failed: {type(exc).__name__}: {exc}",
+            ) from exc
+        return self.source
+
+    def take_recovered_reason(self) -> str | None:
+        """Return one recovery transition after a healthy frame resumes."""
+        reason, self._recovered_reason = self._recovered_reason, None
+        return reason
 
     def read(self) -> AudioFrame:
         try:
-            frame = self.source.read()
-        except (OSError, RuntimeError) as exc:
-            raise MicrophoneHealthError(
-                "unavailable",
-                f"microphone read failed: {type(exc).__name__}: {exc}",
+            frame = self._ensure_source().read()
+        except MicrophoneHealthError:
+            raise
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise self._mark_fault(
+                "unavailable", f"microphone read failed: {type(exc).__name__}: {exc}"
             ) from exc
         if not isinstance(frame, AudioFrame):
-            raise MicrophoneHealthError(
+            raise self._mark_fault(
                 "invalid_audio",
                 f"microphone returned {type(frame).__name__} instead of an AudioFrame",
             )
@@ -97,17 +159,31 @@ class MicrophoneHealthInput(InputSource):
             and frame.sample_rate == self._previous.sample_rate
             and np.array_equal(frame.samples, self._previous.samples)
         )
+        previous = self._previous
         self._frozen_seconds = self._frozen_seconds + duration_seconds if repeated else 0.0
         self._previous = frame
 
+        if self._fault is not None:
+            usable_signal = peak > self.silence_threshold
+            changing_signal = previous is not None and not repeated
+            if not usable_signal or (
+                self._fault.reason == "frozen_signal" and not changing_signal
+            ):
+                raise self._fault
+            self._recovered_reason = self._fault.reason
+            self._fault = None
+            self._silent_seconds = 0.0
+            self._frozen_seconds = 0.0
+            return frame
+
         if self._silent_seconds >= self.failure_seconds:
-            raise MicrophoneHealthError(
+            raise self._mark_fault(
                 "no_signal",
                 f"microphone produced no signal for {self._silent_seconds:.1f} seconds; "
                 "it may be muted, disconnected, or unavailable",
             )
         if self._frozen_seconds >= self.failure_seconds:
-            raise MicrophoneHealthError(
+            raise self._mark_fault(
                 "frozen_signal",
                 f"microphone repeated an identical audio buffer for "
                 f"{self._frozen_seconds:.1f} seconds; capture may be stalled",
@@ -115,9 +191,8 @@ class MicrophoneHealthInput(InputSource):
         return frame
 
     def close(self) -> None:
-        close = getattr(self.source, "close", None)
-        if callable(close):
-            close()
+        self.source_factory = None
+        self._close_source(suppress_errors=False)
 
 
 def _decode_pcm(payload: bytes, sample_width: int) -> np.ndarray:

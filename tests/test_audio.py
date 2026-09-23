@@ -286,6 +286,61 @@ def test_microphone_health_wraps_read_failure_and_closes_source() -> None:
     assert delegate.closed is True
 
 
+def test_microphone_health_reopens_source_and_reports_recovery() -> None:
+    now = [10.0]
+    failed = _FrameInput([RuntimeError("device disappeared")])
+    recovered_frame = AudioFrame(np.array([0.01, -0.01], dtype=np.float32), 2)
+    recovered = _FrameInput([recovered_frame])
+    factory_calls = 0
+
+    def factory() -> InputSource:
+        nonlocal factory_calls
+        factory_calls += 1
+        return recovered
+
+    source = MicrophoneHealthInput(
+        failed,
+        source_factory=factory,
+        retry_interval_seconds=2.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+    assert factory_calls == 0
+    assert failed.closed is True
+
+    now[0] = 12.0
+    assert source.read() is recovered_frame
+    assert source.take_recovered_reason() == "unavailable"
+    assert source.take_recovered_reason() is None
+    assert factory_calls == 1
+
+
+def test_microphone_health_does_not_recover_while_reopened_input_is_silent() -> None:
+    now = [0.0]
+    silent = AudioFrame(np.zeros(2, dtype=np.float32), 2)
+    signal = AudioFrame(np.array([0.01, -0.01], dtype=np.float32), 2)
+    recovered = _FrameInput([silent, signal])
+    source = MicrophoneHealthInput(
+        _FrameInput([RuntimeError("device disappeared")]),
+        source_factory=lambda: recovered,
+        retry_interval_seconds=1.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+    now[0] = 1.0
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+
+    assert source.read() is signal
+    assert source.take_recovered_reason() == "unavailable"
+
+
 def test_audio_spectrum_separates_bands_and_reassembles_model_window() -> None:
     spectrum = AudioSpectrum(rate_hz=20, inference_duration_seconds=1.0)
     samples = np.arange(800, dtype=np.float32) / 16_000

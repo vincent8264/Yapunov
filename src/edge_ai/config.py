@@ -178,6 +178,7 @@ def _build_input(
         health_failure_seconds = 5.0
         health_silence_threshold = 0.0
         health_detect_frozen = True
+        health_retry_interval_seconds = 2.0
         if health is not None:
             if not isinstance(health, dict):
                 raise ConfigError("[input].health must be a table")
@@ -185,30 +186,41 @@ def _build_input(
             health_failure_seconds = _number(health, "failure_seconds", 5.0)
             health_silence_threshold = _number(health, "silence_threshold", 0.0)
             health_detect_frozen = _boolean(health, "detect_frozen", True)
+            health_retry_interval_seconds = _number(
+                health, "retry_interval_seconds", 2.0
+            )
             if health_failure_seconds <= 0.0:
                 raise ConfigError("[input].health.failure_seconds must be positive")
             if not 0.0 <= health_silence_threshold <= 1.0:
                 raise ConfigError(
                     "[input].health.silence_threshold must be between 0 and 1"
                 )
+            if health_retry_interval_seconds <= 0.0:
+                raise ConfigError(
+                    "[input].health.retry_interval_seconds must be positive"
+                )
         microphone_type = (
             MicrophoneInput if component_type == "microphone" else ArduinoMicrophoneInput
         )
         try:
-            source = microphone_type(
+            source_factory = partial(
+                microphone_type,
                 sample_rate=_integer(section, "sample_rate", 16_000),
                 duration_seconds=frame_duration_seconds
                 if frame_duration_seconds is not None
                 else _number(section, "duration_seconds", 1.0),
                 device=device,
             )
+            source = source_factory()
             if not health_enabled:
                 return source
             return MicrophoneHealthInput(
                 source,
+                source_factory=source_factory,
                 failure_seconds=health_failure_seconds,
                 silence_threshold=health_silence_threshold,
                 detect_frozen=health_detect_frozen,
+                retry_interval_seconds=health_retry_interval_seconds,
             )
         except (RuntimeError, ValueError) as exc:
             raise ConfigError(f"invalid [input] configuration: {exc}") from exc

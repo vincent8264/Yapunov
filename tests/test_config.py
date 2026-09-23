@@ -162,8 +162,19 @@ def test_board_microphone_display_uses_twenty_hz_chunks(
     assert isinstance(configured.pipeline.input_source, MicrophoneHealthInput)
 
 
-def test_microphone_health_rejects_invalid_threshold(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("silence_threshold", "1.1"),
+        ("failure_seconds", "0.0"),
+        ("retry_interval_seconds", "0.0"),
+    ],
+)
+def test_microphone_health_rejects_invalid_ranges_before_opening_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str,
+    value: str,
 ) -> None:
     path = tmp_path / "health.toml"
     path.write_text(
@@ -173,7 +184,7 @@ def test_microphone_health_rejects_invalid_threshold(
 type = "microphone"
 [input.health]
 enabled = true
-silence_threshold = 1.1
+{setting} = {value}
 [preprocessing]
 type = "audio_waveform"
 [inference]
@@ -182,13 +193,21 @@ type = "dummy"
 type = "default"
 [hardware]
 type = "mock"
-""",
+""".format(setting=setting, value=value),
         encoding="utf-8",
     )
-    monkeypatch.setattr("edge_ai.config.MicrophoneInput", lambda **_: object())
+    opened = False
 
-    with pytest.raises(ConfigError, match="silence_threshold"):
+    def fake_microphone(**_: object) -> object:
+        nonlocal opened
+        opened = True
+        return object()
+
+    monkeypatch.setattr("edge_ai.config.MicrophoneInput", fake_microphone)
+
+    with pytest.raises(ConfigError, match=setting):
         load_config(path)
+    assert opened is False
 
 
 def test_live_display_accepts_a_shorter_inference_hop(

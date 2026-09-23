@@ -37,6 +37,9 @@ constexpr uint8_t ICON_FALL[8] = {
 constexpr uint8_t ICON_HELP[8] = {
   0xC3, 0xC3, 0xC3, 0xFF, 0xFF, 0xC3, 0xC3, 0xC3
 };
+constexpr uint8_t ICON_MICROPHONE_FAULT[8] = {
+  0x19, 0x3D, 0x3E, 0x3C, 0xBD, 0x7E, 0x58, 0xBC
+};
 
 bool alert_active = false;
 const uint8_t* active_icon = nullptr;
@@ -79,6 +82,8 @@ String show_alert(String event) {
     icon = ICON_FALL;
   } else if (event == "help_call") {
     icon = ICON_HELP;
+  } else if (event == "microphone_fault") {
+    icon = ICON_MICROPHONE_FAULT;
   } else {
     return String("unsupported event");
   }

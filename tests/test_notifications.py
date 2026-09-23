@@ -9,6 +9,7 @@ from edge_ai.hardware.mock import MockHardware
 from edge_ai.notifications import (
     AlertNotification,
     AsyncNotifier,
+    HealthNotification,
     Notifier,
     NotifyingHardware,
     SMTPNotifier,
@@ -157,6 +158,67 @@ def test_fixed_messages_use_cautious_event_specific_copy() -> None:
     assert smoke.subject.startswith("Urgent:")
     assert "check immediately" in smoke.body
     assert "no audio left the device" in smoke.body
+
+
+def test_microphone_fault_and_recovery_messages_contain_health_metadata_only() -> None:
+    fault = render_notification_message(
+        HealthNotification(
+            component="microphone",
+            status="fault",
+            reason="unavailable",
+            detail="microphone read failed",
+            device_name="Living room",
+            timestamp="2026-09-22T14:30:00-07:00",
+        )
+    )
+    recovery = render_notification_message(
+        HealthNotification(
+            component="microphone",
+            status="recovered",
+            reason="unavailable",
+            detail="microphone input resumed",
+            device_name="Living room",
+            timestamp="2026-09-22T14:31:00-07:00",
+        )
+    )
+
+    assert "microphone unavailable" in fault.subject.lower()
+    assert "does not prove" in fault.body
+    assert "no audio left the device" in fault.body
+    assert "microphone available" in recovery.subject.lower()
+    assert "resumed" in recovery.body
+
+
+def test_input_fault_sends_one_notification_and_one_recovery() -> None:
+    physical = MockHardware(verbose=False)
+    notifier = RecordingNotifier()
+    hardware = NotifyingHardware(physical, notifier, device_name="Kitchen")
+
+    hardware.show_input_fault("unavailable", "USB microphone disappeared")
+    hardware.show_input_fault("unavailable", "USB microphone still unavailable")
+    hardware.clear_input_fault("unavailable")
+    hardware.clear_input_fault("unavailable")
+
+    assert [item.status for item in notifier.alerts if isinstance(item, HealthNotification)] == [
+        "fault",
+        "recovered",
+    ]
+    assert physical.input_recoveries == ["unavailable"]
+
+
+def test_health_delivery_lights_fault_status_column() -> None:
+    physical = MockHardware(verbose=False)
+    notifier = QueuedNotifier()
+    hardware = NotifyingHardware(physical, notifier, device_name="Kitchen")
+
+    hardware.show_input_fault("unavailable", "USB microphone disappeared")
+    assert physical.current_alert == "microphone_fault"
+    assert physical.notification_delivered is False
+
+    notifier.results.append((notifier.alerts[0], True))
+    hardware.refresh_status()
+
+    assert physical.notification_delivered is True
 
 
 def test_smtp_notifier_sends_rendered_metadata_only_email(

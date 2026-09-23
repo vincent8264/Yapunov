@@ -60,6 +60,13 @@ class UnoQHardware(HardwareBackend):
         if response != "ok":
             raise RuntimeError(f"UNO Q email status returned {response!r}")
 
+    def show_input_fault(self, reason: str, detail: str) -> None:
+        self.show_alert("microphone_fault")
+
+    def clear_input_fault(self, reason: str) -> None:
+        if self._alert_active:
+            self.clear_alert()
+
     def show_spectrum(self, columns: tuple[int, ...]) -> None:
         if len(columns) != 13 or any(
             isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 8
