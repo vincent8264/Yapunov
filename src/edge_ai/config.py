@@ -215,8 +215,11 @@ def _build_audio_spectrum(
         raise ConfigError("invalid [display] section")
     if _component_type(section, "display") != "audio_spectrum":
         raise ConfigError(f"unsupported [display].type: {section.get('type')!r}")
-    if _component_type(input_section, "input") != "microphone":
-        raise ConfigError("[display] audio_spectrum requires [input].type = 'microphone'")
+    if _component_type(input_section, "input") not in {"microphone", "arduino_microphone"}:
+        raise ConfigError(
+            "[display] audio_spectrum requires [input].type = 'microphone' "
+            "or 'arduino_microphone'"
+        )
     if _component_type(preprocessing_section, "preprocessing") not in {
         "audio_waveform",
         "audio_features",

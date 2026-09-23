@@ -131,6 +131,55 @@ rate_hz = 20
     assert captured["duration_seconds"] == 0.05
 
 
+def test_board_microphone_display_uses_twenty_hz_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = Path("configs/sound-uno-q-live.toml").read_text(encoding="utf-8")
+    path = tmp_path / "board-display.toml"
+    path.write_text(
+        source.replace('model = "../models/yamnet.onnx"\n', "")
+        .replace('type = "yamnet"', 'type = "dummy"')
+        .replace('type = "uno_q"', 'type = "mock"'),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_microphone(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("edge_ai.config.ArduinoMicrophoneInput", fake_microphone)
+    configured = load_config(path)
+
+    assert configured.pipeline.audio_spectrum is not None
+    assert captured["duration_seconds"] == 0.05
+
+
+def test_display_rejects_non_microphone_input(tmp_path: Path) -> None:
+    path = tmp_path / "sim-display.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sound"
+[preprocessing]
+type = "audio_features"
+[inference]
+type = "spectral_demo"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+[display]
+type = "audio_spectrum"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="arduino_microphone"):
+        load_config(path)
+
+
 def test_sound_decision_rejects_invalid_threshold(tmp_path: Path) -> None:
     path = tmp_path / "bad-sound.toml"
     path.write_text(

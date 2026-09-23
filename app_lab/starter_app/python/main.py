@@ -57,17 +57,21 @@ def loop() -> None:
         _CONFIGURED.pipeline.hardware.check_connection()
         _READY = True
     started = time.perf_counter()
-    result, decision = _CONFIGURED.pipeline.step()
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
-    print(
-        f"label={result.label} confidence={result.confidence:.3f} "
-        f"yamnet_label={result.model_label or '-'} "
-        f"yamnet_confidence="
-        f"{result.model_confidence if result.model_confidence is not None else 0.0:.3f} "
-        f"action={decision.action} event={decision.event or '-'} "
-        f"latency_ms={elapsed_ms:.1f}"
-    )
-    delay = _CONFIGURED.interval_seconds - (time.perf_counter() - started)
+    period = max(_CONFIGURED.interval_seconds, _CONFIGURED.pipeline.poll_interval_seconds)
+    step_result = _CONFIGURED.pipeline.step()
+    # With [display], most steps only draw the spectrum and return None.
+    if step_result is not None:
+        result, decision = step_result
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        print(
+            f"label={result.label} confidence={result.confidence:.3f} "
+            f"yamnet_label={result.model_label or '-'} "
+            f"yamnet_confidence="
+            f"{result.model_confidence if result.model_confidence is not None else 0.0:.3f} "
+            f"action={decision.action} event={decision.event or '-'} "
+            f"latency_ms={elapsed_ms:.1f}"
+        )
+    delay = period - (time.perf_counter() - started)
     if delay > 0.0:
         time.sleep(delay)
 
