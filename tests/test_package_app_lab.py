@@ -149,6 +149,45 @@ def test_live_zip_reports_missing_model(tmp_path: Path) -> None:
         _MODULE.package_app(tmp_path / "dist", config_path=config)
 
 
+def test_scheduled_audio_zip_bundles_both_nested_models(tmp_path: Path) -> None:
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "yamnet.onnx").write_bytes(b"environment")
+    (models / "help-kws.onnx").write_bytes(b"keyword")
+    (models / "yamnet_class_map.csv").write_text(
+        "index,mid,display_name\n", encoding="utf-8"
+    )
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    config = configs / "help.toml"
+    config.write_text(
+        _LIVE_CONFIG.replace(
+            '[inference]\ntype = "yamnet"\nmodel = "../models/yamnet.onnx"',
+            '''[inference]
+type = "scheduled_audio"
+environment_every_steps = 3
+[inference.environment]
+type = "yamnet"
+model = "../models/yamnet.onnx"
+[inference.keyword]
+type = "keyword_spotter"
+model = "../models/help-kws.onnx"''',
+        ),
+        encoding="utf-8",
+    )
+
+    zip_path = _MODULE.package_app(tmp_path / "dist", config_path=config)
+
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        packaged = tomllib.loads(archive.read("python/sound-uno-q.toml").decode())
+    assert "python/models/yamnet.onnx" in names
+    assert "python/models/help-kws.onnx" in names
+    assert "python/models/yamnet_class_map.csv" in names
+    assert packaged["inference"]["environment"]["model"] == "models/yamnet.onnx"
+    assert packaged["inference"]["keyword"]["model"] == "models/help-kws.onnx"
+
+
 def test_email_zip_requires_password(tmp_path: Path) -> None:
     private = tmp_path / "private.toml"
     private.write_text(_PRIVATE_CONFIG, encoding="utf-8")

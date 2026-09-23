@@ -71,6 +71,14 @@ curl -L https://huggingface.co/audiomagic/yamnet-onnx/resolve/main/yamnet.onnx \
   -o models/yamnet.onnx
 ```
 
+Model binaries and downloaded/generated audio are deliberately excluded from Git.
+[models/README.md](models/README.md) documents the model contracts and local help
+model build; [data/README.md](data/README.md) gives exact Piper, LibriSpeech, ESC-50,
+and smoke-alarm download locations and licenses. The current `help-kws.onnx` is a
+real locally trained YAMNet-transfer prototype, but its held-out real-speech result is
+not good enough for emergency use; review the recorded false-positive and
+false-negative counts before enabling it.
+
 Then select the MOVO USB-M1 as the operating system's default input and run:
 
 ```bash
@@ -350,6 +358,20 @@ single USB-C port must then carry a powered USB-C hub with the microphone attach
 so run App Lab in Network Mode with the board on Wi-Fi. The first start also needs
 internet to install `onnxruntime`. The log prints YAMNet's top AudioSet label on each
 line (`model_label=Alarm`), which helps tune the thresholds in the live config.
+
+After locally building `models/help-kws.onnx`, package the combined environmental
+sound and spoken-help pipeline with:
+
+```bash
+uv run python scripts/package_app_lab.py --config configs/help-uno-q-live.toml
+```
+
+The packager rewrites and includes both nested model paths, includes YAMNet's class
+map, and installs ONNX Runtime. Import the resulting
+`dist/private-sound-alerts-live.zip` in App Lab. It listens to 0.2-second microphone
+chunks, maintains a one-second sliding window, checks the help model every step, and
+runs the environmental classifier every third step. This is ready for hardware
+integration testing, not unattended safety use.
 
 To exercise the same YAMNet, decision, matrix, and email chain without a microphone,
 package `configs/sound-uno-q-yamnet-sim.toml` instead. It feeds random synthetic

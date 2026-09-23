@@ -67,26 +67,43 @@ representative UNO Q latency, and the final threshold values here.
 The repository's `spectral_demo` engine is only a deterministic integration baseline
 for simulated audio. It must not be used to claim real-world detection accuracy.
 
-## Planned help keyword model contract
+## Local help keyword prototype
 
-No trained keyword checkpoint is selected or committed yet. Do not use
-`configs/help-live.example.toml` for a safety claim until a real model has been
-selected, documented, and evaluated. The `KeywordSpotterInferenceEngine` deliberately
-accepts only a small, explicit ONNX boundary:
+`help-kws.onnx` is generated locally and remains git-ignored. It embeds the Apache-2.0
+YAMNet graph documented above, aggregates YAMNet's 1024-element embeddings with mean
+and maximum pooling, and appends a standardized logistic classifier plus sigmoid.
+The learned classifier is trained by this repository; its synthetic Piper training
+speech and LibriSpeech examples are recreated using [the data instructions](../data/README.md).
+No separately licensed third-party keyword checkpoint is included.
 
-- Local filename expected by the example config: `help-kws.onnx` (git-ignored).
-- Input: exactly one rank-1 `[samples]` or rank-2 `[1, samples]` `float32` raw-waveform
-  input. The configured pipeline supplies one second of mono 16 kHz PCM in `[-1, 1]`.
-- Output: exactly one tensor containing either one `help` probability or a class-score
-  vector. For a vector, `positive_index` identifies `help` (default index 1).
-- Output values must already include sigmoid/softmax activation and be probabilities
-  in `[0, 1]`; logits are rejected.
-- Runtime label mapping: probability at or above `activation_threshold` becomes
-  `help_call`; lower probability becomes `background`.
+- Local filename: `help-kws.onnx`; current local SHA-256:
+  `6f878423237416b5005bdfb4fe52ee8c1385ae458d8ded33cc701d078c4c058f`.
+- Input: rank-1 `float32` tensor `waveform`, one second of mono 16 kHz PCM in
+  `[-1, 1]`. YAMNet's log-mel frontend is part of the graph.
+- Output: rank-1 tensor `help_probability` with one sigmoid probability.
+- Labels: `0` is background and the single output represents `help_call`.
+- Configured activation threshold: `0.62`, selected on a held-out mix of synthetic
+  speech and full-length LibriSpeech background clips using live-style overlapping
+  windows.
 
-When selecting or training the model, add its source URL, immutable revision/hash,
-license, training label order, precise tensor names/shapes, preprocessing, export
-steps, SHA-256, held-out results, and measured UNO Q latency to this section. A model
-from a framework such as openWakeWord is not automatically compatible with this raw
-waveform contract; either export the complete frontend and classifier as one ONNX
-graph or add a tested framework-specific adapter.
+Build the local model after following `data/README.md`:
+
+```bash
+uv pip install --python .venv/bin/python onnx==1.19.0
+uv run python scripts/train_help_kws.py \
+  --dataset data/help-kws/synthetic \
+  --additional-train-background data/help-kws/librispeech-background/train \
+  --additional-train-help data/help-kws/librispeech-help-train \
+  --additional-validation-background data/help-kws/librispeech-background/validation \
+  --yamnet models/yamnet.onnx --output models/help-kws.onnx
+```
+
+The current held-out LibriSpeech `test-clean` result at threshold `0.62` is 6 true
+positives, 21 false positives, 39 true negatives, and 9 false negatives across 75
+utterances (precision 0.222, recall 0.400, accuracy 0.600). This is an honest
+prototype result, not a safety-ready detector. The test utterances contain the word
+in audiobook prose rather than urgent calls, but the false-positive and false-negative
+rates are still too high. Do not rely on this model for emergencies. The next model
+iteration needs genuine, consented near/far microphone recordings of urgent “help”
+calls and confusing household speech; record a new untouched test split before
+retuning or claiming improvement.

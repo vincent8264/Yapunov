@@ -55,3 +55,27 @@ def test_evaluate_keyword_dataset_requires_both_classes(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="background"):
         evaluation.evaluate_keyword_dataset(tmp_path, SequenceEngine([]))
+
+
+def test_evaluate_keyword_dataset_checks_overlapping_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "dataset"
+    for label in ("help_call", "background"):
+        (root / label).mkdir(parents=True)
+        (root / label / "long.wav").touch()
+    monkeypatch.setattr(
+        evaluation,
+        "read_wav",
+        lambda path: AudioFrame(np.zeros(32_000, dtype=np.float32), 16_000),
+    )
+    # The positive is found in its third window; all six negative windows remain
+    # background. A first-second-only evaluator would miss this keyword.
+    engine = SequenceEngine(
+        ["background", "background", "help_call"] + ["background"] * 6
+    )
+
+    result = evaluation.evaluate_keyword_dataset(root, engine)
+
+    assert result.true_positive == 1
+    assert result.true_negative == 1

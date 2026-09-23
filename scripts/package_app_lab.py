@@ -1,7 +1,7 @@
 """Build an Arduino App Lab zip that contains the sound pipeline.
 
-Pass ``--config`` to choose the board pipeline; a model referenced by its
-``[inference]`` section is bundled under ``python/models/``. Pass
+Pass ``--config`` to choose the board pipeline; models referenced anywhere below
+its ``[inference]`` section are bundled under ``python/models/``. Pass
 ``--notifications`` with a private SMTP config to enable email on the board, or
 ``--mode yamnet-test`` to replay bundled WAV fixtures through YAMNet.
 The SMTP password is read from that config's ``password_env`` variable and written
@@ -124,29 +124,66 @@ def _write_synthetic_wavs(destination: Path) -> None:
 
 
 def _bundled_model(source: str, config_path: Path) -> tuple[str, list[Path], bool]:
-    """Point ``[inference].model`` at ``python/models/`` and list the files to copy.
+    """Point inference model paths at ``python/models/`` and list files to copy.
 
     Returns the rewritten config, the model files, and whether ONNX Runtime is needed.
     """
     inference = tomllib.loads(source).get("inference", {})
-    model = inference.get("model") if isinstance(inference, dict) else None
-    if not isinstance(model, str):
+    if not isinstance(inference, dict):
         return source, [], False
-    model_path = (config_path.parent / model).resolve()
-    if not model_path.is_file():
-        raise ValueError(
-            f"model not found: {model_path}. Download it as described in models/README.md"
-        )
-    files = [model_path]
-    if inference.get("type") == "yamnet":
-        class_map = model_path.with_name("yamnet_class_map.csv")
-        if not class_map.is_file():
-            raise ValueError(f"YAMNet class map not found: {class_map}")
-        files.append(class_map)
-    pattern = re.compile(r'^(model\s*=\s*)"[^"]*"', flags=re.MULTILINE)
-    rewritten, count = pattern.subn(rf'\1"models/{model_path.name}"', source, count=1)
-    if count != 1:
-        raise ValueError(f"could not rewrite [inference].model in {config_path}")
+
+    references: list[tuple[str, str | None]] = []
+
+    def visit(section: dict[str, object]) -> None:
+        model = section.get("model")
+        if isinstance(model, str):
+            component_type = section.get("type")
+            references.append(
+                (model, component_type if isinstance(component_type, str) else None)
+            )
+        for value in section.values():
+            if isinstance(value, dict):
+                visit(value)
+
+    visit(inference)
+    if not references:
+        return source, [], False
+
+    files: list[Path] = []
+    names: dict[str, Path] = {}
+    replacements: dict[str, str] = {}
+    for model, component_type in references:
+        model_path = (config_path.parent / model).resolve()
+        if not model_path.is_file():
+            raise ValueError(
+                f"model not found: {model_path}. Download it as described in models/README.md"
+            )
+        previous = names.get(model_path.name)
+        if previous is not None and previous != model_path:
+            raise ValueError(f"model filename collision: {previous} and {model_path}")
+        names[model_path.name] = model_path
+        if model_path not in files:
+            files.append(model_path)
+        replacements[model] = f"models/{model_path.name}"
+        if component_type == "yamnet":
+            class_map = model_path.with_name("yamnet_class_map.csv")
+            if not class_map.is_file():
+                raise ValueError(f"YAMNet class map not found: {class_map}")
+            if class_map not in files:
+                files.append(class_map)
+
+    pattern = re.compile(r'^(model\s*=\s*)("(?:[^"\\]|\\.)*")', flags=re.MULTILINE)
+
+    def replace_model(match: re.Match[str]) -> str:
+        model = json.loads(match.group(2))
+        replacement = replacements.get(model)
+        if replacement is None:
+            return match.group(0)
+        return match.group(1) + json.dumps(replacement)
+
+    rewritten, count = pattern.subn(replace_model, source)
+    if count < len(references):
+        raise ValueError(f"could not rewrite all inference model paths in {config_path}")
     return rewritten, files, True
 
 

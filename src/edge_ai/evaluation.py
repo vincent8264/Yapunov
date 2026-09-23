@@ -3,9 +3,11 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from edge_ai.inference.base import InferenceEngine
 from edge_ai.inputs.audio import read_wav
-from edge_ai.preprocessing.audio import prepare_audio_waveform
+from edge_ai.preprocessing.audio import resample_audio_frame
 
 
 @dataclass(frozen=True)
@@ -49,8 +51,11 @@ def evaluate_keyword_dataset(
     *,
     sample_rate: int = 16_000,
     duration_seconds: float = 1.0,
+    step_seconds: float = 0.2,
 ) -> KeywordEvaluation:
-    """Evaluate WAV clips stored under ``help_call`` and ``background`` folders."""
+    """Evaluate WAV clips with overlapping windows, as the live pipeline does."""
+    if duration_seconds <= 0.0 or step_seconds <= 0.0:
+        raise ValueError("keyword evaluation window and step must be positive")
     root = Path(dataset)
     examples: list[tuple[bool, Path]] = []
     for label, expected_positive in (("help_call", True), ("background", False)):
@@ -65,12 +70,23 @@ def evaluate_keyword_dataset(
     true_positive = false_positive = true_negative = false_negative = 0
     for expected_positive, path in examples:
         frame = read_wav(path)
-        waveform = prepare_audio_waveform(
-            frame,
-            sample_rate=sample_rate,
-            duration_seconds=duration_seconds,
-        )
-        predicted_positive = engine.predict(waveform).label == "help_call"
+        samples = resample_audio_frame(frame, sample_rate=sample_rate)
+        window_size = round(sample_rate * duration_seconds)
+        step_size = round(sample_rate * step_seconds)
+        if window_size < 1 or step_size < 1:
+            raise ValueError("keyword evaluation window and step must span a sample")
+        starts = list(range(0, max(1, samples.size - window_size + 1), step_size))
+        final_start = max(0, samples.size - window_size)
+        if starts[-1] != final_start:
+            starts.append(final_start)
+        predicted_positive = False
+        for start in starts:
+            waveform = samples[start : start + window_size]
+            if waveform.size < window_size:
+                waveform = np.pad(waveform, (0, window_size - waveform.size))
+            if engine.predict(waveform).label == "help_call":
+                predicted_positive = True
+                break
         if expected_positive and predicted_positive:
             true_positive += 1
         elif expected_positive:
