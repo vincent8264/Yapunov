@@ -20,6 +20,8 @@ from edge_ai.notifications import AlertNotification
 from edge_ai.preprocessing.audio import resample_audio_frame
 from edge_ai.runner import run_pipeline
 from edge_ai.setup_server import run_setup_server
+from edge_ai.transcription import SherpaZipformerTranscriber
+from edge_ai.inputs.audio import MicrophoneInput
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -102,6 +104,31 @@ def _parser() -> argparse.ArgumentParser:
         default=1,
         help="help class index for multi-score outputs (default: 1)",
     )
+    transcribe = subparsers.add_parser(
+        "transcribe", help="transcribe a local microphone with streaming Sherpa ASR"
+    )
+    transcribe.add_argument(
+        "--model-dir",
+        type=Path,
+        required=True,
+        help="unpacked sherpa-onnx-streaming-zipformer-en-2023-06-26 directory",
+    )
+    transcribe.add_argument(
+        "--device",
+        help="microphone name or numeric SoundDevice index (default: system default)",
+    )
+    transcribe.add_argument(
+        "--chunk-seconds",
+        type=float,
+        default=0.2,
+        help="microphone frame duration in seconds (default: 0.2)",
+    )
+    transcribe.add_argument(
+        "--threads",
+        type=int,
+        default=1,
+        help="ASR CPU threads; keep at 1 when sharing YAMNet (default: 1)",
+    )
     return parser
 
 
@@ -150,6 +177,35 @@ def _evaluate_keyword(
         activation_threshold=threshold,
         positive_index=positive_index,
     )
+
+
+def _transcribe(
+    model_dir: Path,
+    device: str | None,
+    chunk_seconds: float,
+    threads: int,
+) -> None:
+    if chunk_seconds <= 0.0:
+        raise ValueError("--chunk-seconds must be positive")
+    transcriber = SherpaZipformerTranscriber(model_dir, num_threads=threads)
+    microphone = MicrophoneInput(
+        sample_rate=16_000,
+        duration_seconds=chunk_seconds,
+        device=int(device) if device is not None and device.isdigit() else device,
+    )
+    print("Listening. Press Ctrl+C to stop.")
+    try:
+        while True:
+            for update in transcriber.accept(microphone.read()):
+                prefix = "final" if update.is_final else "partial"
+                print(f"{prefix}: {update.text}")
+    finally:
+        try:
+            update = transcriber.finish()
+            if update is not None:
+                print(f"final: {update.text}")
+        finally:
+            microphone.close()
     result = evaluate_keyword_dataset(dataset, engine)
     print(
         f"clips={result.total} TP={result.true_positive} FP={result.false_positive} "
@@ -181,6 +237,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_setup_server(args.config, host=args.host, port=args.port)
         elif args.command == "inspect-audio":
             _inspect_audio(args.audio, args.model, args.class_map, args.top_k)
+        elif args.command == "transcribe":
+            _transcribe(args.model_dir, args.device, args.chunk_seconds, args.threads)
         else:
             _evaluate_keyword(
                 args.dataset,

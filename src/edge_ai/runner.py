@@ -48,6 +48,9 @@ def run_pipeline(
                 f" {name}_ms={latency_ms:.1f}"
                 for name, latency_ms in result.timings_ms
             )
+            transcript = (
+                f" transcript={result.transcript}" if result.transcript is not None else ""
+            )
             emit(
                 f"step={steps} label={result.label} confidence={result.confidence:.3f} "
                 f"source={result.source or '-'} model_label={result.model_label or '-'} "
@@ -55,7 +58,7 @@ def run_pipeline(
                 f"{result.model_confidence if result.model_confidence is not None else 0.0:.3f} "
                 f"action={decision.action} event={decision.event or '-'} "
                 f"notify={str(decision.notify).lower()} latency_ms={elapsed_ms:.1f}"
-                f"{detector_timings}"
+                f"{detector_timings}{transcript}"
             )
             delay = max(
                 configured.interval_seconds, configured.pipeline.poll_interval_seconds

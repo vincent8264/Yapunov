@@ -69,6 +69,53 @@ representative UNO Q latency, and the final threshold values here.
 The repository's `spectral_demo` engine is only a deterministic integration baseline
 for simulated audio. It must not be used to claim real-world detection accuracy.
 
+## Laptop transcription model: Sherpa Zipformer English 66M
+
+This is a laptop-only speech-to-text evaluation. The standalone `transcribe` command
+does not feed its transcript into the alert policy. The separate laptop-only
+`help-asr-live.example.toml` simulation can emit `help_call` from an exact transcript
+match. A future UNO Q integration must use one microphone stream, fan its
+non-overlapping frames to this ASR engine, and separately retain the rolling one-second
+YAMNet window.
+
+- Source: the `sherpa-onnx-streaming-zipformer-en-2023-06-26` asset from
+  [Sherpa-ONNX's `asr-models` release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models),
+  converted from
+  [`Zengwei/icefall-asr-librispeech-streaming-zipformer-2023-05-17`](https://huggingface.co/Zengwei/icefall-asr-librispeech-streaming-zipformer-2023-05-17).
+- License: the upstream model card has no license metadata. The Icefall and Sherpa
+  inference code are Apache-2.0, but the checkpoint's redistribution terms must be
+  confirmed before it is bundled into an App Lab package or otherwise redistributed.
+  The upstream model has 66.11M parameters and reports 2.83% WER on LibriSpeech
+  test-clean with beam search; this is not a claim about this project's microphone or
+  deployment room.
+- Local directory (ignored): `sherpa-onnx-streaming-zipformer-en-2023-06-26`.
+  The verified SHA-256 hashes are `5022b2eca5b19d1bc104fcf33e26bc32604b7df553cd2e1f62e31dc7b05e9c87`
+  for the int8 encoder, `85914f840b71110487ece7a30ebd0bd4b8fb5c2623215bba3aa5ab4c138fc591`
+  for the FP32 decoder, and `abd5e30f3f16fc510605c6029dba33f10e4386bd75c5bdc30cf94076864db10d`
+  for the int8 joiner.
+- Input: non-empty, mono `float32` waveform frames at 16 kHz, normalized to roughly
+  `[-1, 1]`. Sherpa computes 80-bin acoustic features internally and accepts each
+  captured frame once.
+- Assets: `encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx` (70,108,816 bytes),
+  `decoder-epoch-99-avg-1-chunk-16-left-128.onnx` (2,093,080 bytes),
+  `joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx` (259,416 bytes), and
+  `tokens.txt` (the BPE token order). The adapter uses CPU-only greedy decoding and
+  one compute thread.
+- Output: changed partial text and endpointed final text. It has no calibrated class
+  probabilities, label order, or decision threshold.
+- Laptop smoke test: the packaged `test_wavs/0.wav` produced the final text
+  `AFTER EARLY NIGHTFALL THE YELLOW LAMPS WOULD LIGHT UP HERE AND THERE THE SQUALID QUARTER OF THE BROTHELS`
+  with `sherpa-onnx==1.13.8` on 2026-09-23. This only proves loading and inference;
+  microphone accuracy, latency, memory, and UNO Q compatibility remain unmeasured.
+- Laptop `help` simulation: `TranscriptHelpYAMNetInferenceEngine` detects exact,
+  standalone `help` in changed Zipformer partial or final text and emits the existing
+  `help_call` event with confidence `1.0`. This is a deterministic text match, not a
+  calibrated ASR confidence or an emergency-use safety claim. It is connected only to
+  the laptop `MockHardware` configuration. With the local
+  `runs/recordings/help/recording-20260922-172120.wav` fixture followed by one second
+  of silence, it emitted `help_call` with transcript `HELP`; that is a smoke test, not
+  an accuracy evaluation.
+
 ## Local help keyword prototype
 
 `help-kws.onnx` is generated locally and remains git-ignored. It embeds the Apache-2.0

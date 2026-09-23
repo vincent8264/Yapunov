@@ -5,6 +5,8 @@ __pycache__/
 .coverage
 *.onnx
 !models/README.md
+models/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/
+models/sherpa-onnx-streaming-zipformer-en-2023-06-26/
 .DS_Store
 Thumbs.db
 /.idea/

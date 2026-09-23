@@ -393,6 +393,32 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
             )
         except ValueError as exc:
             raise ConfigError(f"invalid [inference] configuration: {exc}") from exc
+    if component_type == "transcript_help_yamnet":
+        model = section.get("model")
+        asr_model_dir = section.get("asr_model_dir")
+        if not isinstance(model, str) or not model:
+            raise ConfigError("[inference].model must be a non-empty YAMNet path")
+        if not isinstance(asr_model_dir, str) or not asr_model_dir:
+            raise ConfigError("[inference].asr_model_dir must be a non-empty path")
+        from edge_ai.inference.transcript_alert import TranscriptHelpYAMNetInferenceEngine
+        from edge_ai.inference.yamnet import YAMNetInferenceEngine
+        from edge_ai.transcription import SherpaZipformerTranscriber
+
+        try:
+            return TranscriptHelpYAMNetInferenceEngine(
+                YAMNetInferenceEngine(
+                    (config_dir / model).resolve(),
+                    background_threshold=_number(section, "background_threshold", 0.1),
+                ),
+                SherpaZipformerTranscriber(
+                    (config_dir / asr_model_dir).resolve(),
+                    num_threads=_integer(section, "asr_threads", 1),
+                ),
+                window_seconds=_number(section, "yamnet_window_seconds", 1.0),
+                yamnet_hop_seconds=_number(section, "yamnet_hop_seconds", 0.2),
+            )
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
+            raise ConfigError(str(exc)) from exc
     raise ConfigError(f"unsupported [inference].type: {component_type!r}")
 
 

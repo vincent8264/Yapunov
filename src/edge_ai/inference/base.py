@@ -14,6 +14,7 @@ class InferenceResult:
     source: str | None = None
     evaluated_events: tuple[str, ...] | None = None
     timings_ms: tuple[tuple[str, float], ...] = ()
+    transcript: str | None = None
 
 
 class InferenceEngine(ABC):

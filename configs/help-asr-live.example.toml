@@ -1,0 +1,36 @@
+# Laptop-only simulation: transcript-triggered `help_call` plus YAMNet sound events.
+# It is intentionally not an Arduino App Lab or UNO Q deployment configuration.
+[runtime]
+interval_seconds = 0.0
+
+[input]
+type = "microphone"
+sample_rate = 16000
+duration_seconds = 0.2
+
+[preprocessing]
+# Combined inference fans raw frames to ASR and its own YAMNet buffer.
+type = "identity"
+
+[inference]
+type = "transcript_help_yamnet"
+model = "../models/yamnet.onnx"
+asr_model_dir = "../models/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+background_threshold = 0.10
+asr_threads = 1
+yamnet_window_seconds = 1.0
+yamnet_hop_seconds = 0.2
+
+[decision]
+type = "sound_events"
+thresholds = { smoke_alarm = 0.50, glass_break = 0.50, fall_thud = 0.20, help_call = 1.00 }
+confirmations = { smoke_alarm = 1, glass_break = 1, fall_thud = 1, help_call = 1 }
+hold_seconds = 5.0
+notification_cooldown_seconds = 30.0
+
+[hardware]
+type = "mock"
+
+[notifications]
+type = "none"
+device_name = "Laptop sound and transcript simulation"

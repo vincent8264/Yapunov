@@ -12,6 +12,9 @@ dependencies = [
     "tzdata>=2025.2; sys_platform == 'win32'",
 ]
 
+[project.optional-dependencies]
+asr = ["sherpa-onnx>=1.13.6"]
+
 [project.scripts]
 edge-ai = "edge_ai.cli:main"
 
