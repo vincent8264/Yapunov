@@ -1,3 +1,5 @@
 name: Private Sound Alerts
 icon: "🔊"
 description: Local sound-event decisions rendered as private visual alerts on the UNO Q matrix.
+ports:
+  - 8080

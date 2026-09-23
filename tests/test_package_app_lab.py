@@ -39,6 +39,7 @@ def test_app_lab_zip_contains_pipeline(tmp_path: Path) -> None:
     with zipfile.ZipFile(zip_path) as archive:
         names = set(archive.namelist())
         board_config = tomllib.loads(archive.read("python/sound-uno-q.toml").decode())
+        manifest = archive.read("app.yaml").decode()
 
     assert zip_path.name == "private-sound-alerts-live.zip"
     assert "app.yaml" in names
@@ -48,6 +49,7 @@ def test_app_lab_zip_contains_pipeline(tmp_path: Path) -> None:
     assert "sketch/sketch.yaml" in names
     assert "python/smtp-password" not in names
     assert board_config["notifications"]["type"] == "none"
+    assert "ports:\n  - 8080" in manifest
 
 
 def test_email_zip_bundles_password_file_outside_config(tmp_path: Path) -> None:
@@ -70,13 +72,13 @@ def test_email_zip_bundles_password_file_outside_config(tmp_path: Path) -> None:
     notifications = tomllib.loads(config_text)["notifications"]
     assert notifications["type"] == "smtp"
     assert notifications["password_file"] == "smtp-password"
-    assert notifications["settings_file"] == "notification-settings.json"
+    assert notifications["settings_file"] == "../data/notification-settings.json"
     assert "password_env" not in notifications
     assert tomllib.loads(config_text)["setup"] == {
         "enabled": True,
         "host": "0.0.0.0",
         "port": 8080,
-        "pin_file": "setup-pin",
+        "pin_file": "../data/setup-pin",
     }
     assert tomllib.loads(config_text)["hardware"]["type"] == "uno_q"
 
