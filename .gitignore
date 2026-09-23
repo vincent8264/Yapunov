@@ -11,6 +11,8 @@ Thumbs.db
 /dist/
 /configs/private-live.toml
 /configs/private.live.toml
+/configs/audio-caption-live.toml
+/models/whisper-small-audio-captioning/
 /data/notification-settings.json
 /data/evaluation/
 /data/help-kws/

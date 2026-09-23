@@ -14,6 +14,7 @@ from edge_ai.inputs.audio import (
     WavAudioInput,
 )
 from edge_ai.preprocessing.audio import (
+    RollingAudioWindow,
     SlidingAudioWindow,
     extract_audio_features,
     prepare_audio_waveform,
@@ -57,6 +58,34 @@ def test_sliding_audio_window_reuses_overlapping_history() -> None:
     assert first == pytest.approx([0.0, 0.0, 0.1, 0.2])
     assert second == pytest.approx([0.1, 0.2, 0.3, 0.4])
     assert third == pytest.approx([0.3, 0.4, 0.5, 0.6])
+
+
+def test_rolling_audio_window_waits_for_full_window_and_uses_hop() -> None:
+    window = RollingAudioWindow(sample_rate=4, window_seconds=1.0, hop_seconds=0.5)
+
+    def frame(value: int) -> AudioFrame:
+        return AudioFrame(np.array([value / 10], dtype=np.float32), 4)
+
+    for value in range(3):
+        assert window(frame(value)) is None
+    first = window(frame(3))
+    assert first is not None
+    assert first.tolist() == pytest.approx([0.0, 0.1, 0.2, 0.3])
+
+    assert window(frame(4)) is None
+    second = window(frame(5))
+    assert second is not None
+    assert second.tolist() == pytest.approx([0.2, 0.3, 0.4, 0.5])
+
+
+def test_rolling_audio_window_rejects_a_subsample_hop() -> None:
+    with pytest.raises(ValueError, match="span at least one sample"):
+        RollingAudioWindow(sample_rate=4, window_seconds=1.0, hop_seconds=0.01)
+
+
+def test_rolling_audio_window_rejects_a_subsample_window() -> None:
+    with pytest.raises(ValueError, match="window_seconds must span at least one sample"):
+        RollingAudioWindow(sample_rate=4, window_seconds=0.01)
 
 
 def test_resample_audio_frame_keeps_full_duration() -> None:

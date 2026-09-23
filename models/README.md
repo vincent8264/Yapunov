@@ -109,3 +109,35 @@ rates are still too high. Do not rely on this model for emergencies. The next mo
 iteration needs genuine, consented near/far microphone recordings of urgent “help”
 calls and confusing household speech; record a new untouched test split before
 retuning or claiming improvement.
+
+## Laptop-only audio-caption experiment: Whisper Small Audio Captioning
+
+`MU-NLPC/whisper-small-audio-captioning` is an optional laptop quality-evaluation
+checkpoint. It is not included in the application, is not packaged for Arduino App
+Lab, and must not replace the calibrated event decision policy. Download it locally
+to `models/whisper-small-audio-captioning/` with the command in the README.
+
+- Source and version: `MU-NLPC/whisper-small-audio-captioning`, Hugging Face main
+  revision selected when downloaded; record the resolved commit and SHA-256 before
+  reporting any results: <https://huggingface.co/MU-NLPC/whisper-small-audio-captioning>.
+- License: the model card marks the weights CC BY-NC 4.0. Treat it as non-commercial
+  unless the maintainers clarify otherwise.
+- Input: mono waveform at 16 kHz, `float32`, nominally in `[-1, 1]`; the adapter
+  resamples the WAV input without peak normalization and retains at most 30 seconds.
+  The checkpoint's Whisper feature extractor creates the log-mel input internally.
+- Text prefix/style: `clotho` asks for a natural scene caption; `audiocaps` asks for
+  a short caption; `audioset` asks for keywords. All generated captions are English.
+- Output: one autoregressively generated text caption. It is not a probability,
+  class score, or reliable confirmation of a safety event. The adapter sets
+  `label = "caption"` and confidence to `0.0` so the normal decision policy stays
+  idle.
+- Adapter: `WhisperAudioCaptionInferenceEngine`, used only by `edge-ai
+  caption-audio`, `configs/audio-caption.example.toml`, and the laptop-only
+  `configs/audio-caption-live.example.toml`. The live workflow buffers a complete
+  five-second window before each caption and requires the optional laptop
+  `audio-caption` dependency extra (PyTorch and Transformers).
+
+Before comparing it with YAMNet, run the same genuine recordings through all three
+styles, save the captions with their clip metadata, and measure laptop latency. The
+model card warns that captions can be plausible but wrong, particularly outside its
+training domains; never use a caption directly to trigger an alert or notification.

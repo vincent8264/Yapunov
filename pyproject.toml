@@ -12,6 +12,14 @@ dependencies = [
     "tzdata>=2025.2; sys_platform == 'win32'",
 ]
 
+[project.optional-dependencies]
+# Laptop-only MU-NLPC Whisper audio-captioning evaluation. These packages never
+# enter an Arduino App Lab package.
+audio-caption = [
+    "torch>=2.6",
+    "transformers>=4.48,<5",
+]
+
 [project.scripts]
 edge-ai = "edge_ai.cli:main"
 

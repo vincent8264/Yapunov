@@ -13,6 +13,7 @@ from edge_ai.config import (
 )
 from edge_ai.diagnostics import run_hardware_checks
 from edge_ai.evaluation import evaluate_keyword_dataset
+from edge_ai.inference.audio_caption import WhisperAudioCaptionInferenceEngine
 from edge_ai.inference.keyword import KeywordSpotterInferenceEngine
 from edge_ai.inference.yamnet import YAMNetInferenceEngine
 from edge_ai.inputs.audio import read_wav
@@ -102,6 +103,25 @@ def _parser() -> argparse.ArgumentParser:
         default=1,
         help="help class index for multi-score outputs (default: 1)",
     )
+    caption_audio = subparsers.add_parser(
+        "caption-audio", help="generate local Whisper captions for PCM WAV files"
+    )
+    caption_audio.add_argument("audio", type=Path, nargs="+", help="PCM WAV files to caption")
+    caption_audio.add_argument(
+        "--model-dir", type=Path, required=True, help="local MU-NLPC checkpoint directory"
+    )
+    caption_audio.add_argument(
+        "--style",
+        choices=("clotho", "audiocaps", "audioset"),
+        default="clotho",
+        help="caption style (default: clotho)",
+    )
+    caption_audio.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=64,
+        help="maximum generated tokens (default: 64)",
+    )
     return parser
 
 
@@ -161,6 +181,18 @@ def _evaluate_keyword(
     )
 
 
+def _caption_audio(
+    audio_paths: Sequence[Path], model_dir: Path, style: str, max_new_tokens: int
+) -> None:
+    engine = WhisperAudioCaptionInferenceEngine(
+        model_dir, style=style, max_new_tokens=max_new_tokens
+    )
+    for path in audio_paths:
+        frame = read_wav(path)
+        waveform = resample_audio_frame(frame, sample_rate=16_000)
+        print(f"{path}: {engine.caption(waveform)}")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -181,6 +213,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_setup_server(args.config, host=args.host, port=args.port)
         elif args.command == "inspect-audio":
             _inspect_audio(args.audio, args.model, args.class_map, args.top_k)
+        elif args.command == "caption-audio":
+            _caption_audio(args.audio, args.model_dir, args.style, args.max_new_tokens)
         else:
             _evaluate_keyword(
                 args.dataset,

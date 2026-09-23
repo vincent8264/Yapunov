@@ -1,6 +1,7 @@
 from pathlib import Path
 import tomllib
 
+import numpy as np
 import pytest
 
 from edge_ai.config import (
@@ -10,7 +11,7 @@ from edge_ai.config import (
     load_notification_config,
 )
 from edge_ai.hardware.mock import MockHardware
-from edge_ai.inputs.audio import SimulatedSoundInput
+from edge_ai.inputs.audio import AudioFrame, SimulatedSoundInput
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
 from edge_ai.notifications import SMTPNotifier
 from edge_ai.settings import NotificationPreferences, save_notification_preferences
@@ -343,6 +344,149 @@ type = "mock"
     )
 
     with pytest.raises(ConfigError, match="YAMNet ONNX model not found"):
+        load_config(path)
+
+
+def test_audio_caption_config_requires_a_local_model_directory(tmp_path: Path) -> None:
+    path = tmp_path / "caption.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sound"
+[preprocessing]
+type = "audio_resample"
+[inference]
+type = "whisper_audio_caption"
+model_dir = "missing-model"
+style = "clotho"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="model directory not found"):
+        load_config(path)
+
+
+def test_audio_caption_config_builds_a_laptop_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from edge_ai.inference import audio_caption
+
+    model_dir = tmp_path / "caption-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(
+        audio_caption,
+        "_load_runtime",
+        lambda _: audio_caption._CaptionRuntime(None, None, None, None),
+    )
+    path = tmp_path / "caption.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sound"
+[preprocessing]
+type = "audio_resample"
+[inference]
+type = "whisper_audio_caption"
+model_dir = "caption-model"
+style = "clotho"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    configured = load_config(path)
+
+    assert isinstance(
+        configured.pipeline.inference, audio_caption.WhisperAudioCaptionInferenceEngine
+    )
+
+
+def test_rolling_audio_caption_preprocessor_builds_from_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from edge_ai.inference import audio_caption
+
+    model_dir = tmp_path / "caption-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(
+        audio_caption,
+        "_load_runtime",
+        lambda _: audio_caption._CaptionRuntime(None, None, None, None),
+    )
+    path = tmp_path / "caption-live.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sound"
+sample_rate = 8000
+duration_seconds = 1.0
+[preprocessing]
+type = "audio_rolling_window"
+sample_rate = 8000
+duration_seconds = 5.0
+hop_seconds = 5.0
+[inference]
+type = "whisper_audio_caption"
+model_dir = "caption-model"
+style = "clotho"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    configured = load_config(path)
+    preprocessor = configured.pipeline.preprocessor
+
+    for value in range(4):
+        assert preprocessor(
+            AudioFrame(np.full(8_000, value / 5, dtype=np.float32), 8_000)
+        ) is None
+    output = preprocessor(
+        AudioFrame(np.full(8_000, 4 / 5, dtype=np.float32), 8_000)
+    )
+    assert output is not None
+    assert output.shape == (40_000,)
+    assert output[::8_000].tolist() == pytest.approx([value / 5 for value in range(5)])
+
+
+def test_rolling_audio_caption_preprocessor_rejects_hop_larger_than_window(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "bad-rolling.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sound"
+[preprocessing]
+type = "audio_rolling_window"
+duration_seconds = 5.0
+hop_seconds = 6.0
+[inference]
+type = "dummy"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="no greater than window_seconds"):
         load_config(path)
 
 

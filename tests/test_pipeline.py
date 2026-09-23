@@ -37,6 +37,16 @@ def test_pipeline_runs_all_stages() -> None:
     assert hardware.led_enabled is True
 
 
+def test_pipeline_skips_inference_until_rolling_audio_is_ready() -> None:
+    inference = RecordingInference()
+    hardware = MockHardware(verbose=False)
+    pipeline = Pipeline(FixedInput(), lambda _: None, inference, decide, hardware)
+
+    assert pipeline.step() is None
+    assert inference.received is None
+    assert hardware.last_decision is None
+
+
 def test_audio_display_ticks_before_one_second_inference_window() -> None:
     class ShortAudioInput(InputSource):
         def read(self) -> AudioFrame:

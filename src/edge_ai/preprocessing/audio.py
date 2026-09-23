@@ -119,6 +119,60 @@ class SlidingAudioWindow:
         return np.clip(output, -1.0, 1.0).astype(np.float32, copy=False)
 
 
+class RollingAudioWindow:
+    """Accumulate audio until a full window is ready, then emit at a fixed hop.
+
+    Unlike :class:`SlidingAudioWindow`, this class never pads an incomplete first
+    window. It is suitable for slower generative models that should not be asked
+    to caption mostly-silent synthetic padding at startup.
+    """
+
+    def __init__(
+        self,
+        *,
+        sample_rate: int = 16_000,
+        window_seconds: float = 5.0,
+        hop_seconds: float | None = None,
+        peak_normalize: bool = False,
+    ) -> None:
+        if isinstance(sample_rate, bool) or sample_rate < 1:
+            raise ValueError("sample_rate must be positive")
+        if window_seconds <= 0.0:
+            raise ValueError("window_seconds must be positive")
+        effective_hop = window_seconds if hop_seconds is None else hop_seconds
+        if not 0.0 < effective_hop <= window_seconds:
+            raise ValueError("hop_seconds must be greater than 0 and no greater than window_seconds")
+        self.sample_rate = sample_rate
+        self.window_samples = round(sample_rate * window_seconds)
+        if self.window_samples < 1:
+            raise ValueError("window_seconds must span at least one sample")
+        self.hop_samples = round(sample_rate * effective_hop)
+        if self.hop_samples < 1:
+            raise ValueError("hop_seconds must span at least one sample")
+        self.peak_normalize = peak_normalize
+        self._samples = np.empty(0, dtype=np.float32)
+        self._has_emitted = False
+        self._samples_since_emit = 0
+
+    def __call__(self, frame: AudioFrame) -> np.ndarray | None:
+        chunk = resample_audio_frame(frame, sample_rate=self.sample_rate)
+        self._samples = np.concatenate((self._samples, chunk))[-self.window_samples :]
+        if self._samples.size < self.window_samples:
+            return None
+        if self._has_emitted:
+            self._samples_since_emit += chunk.size
+            if self._samples_since_emit < self.hop_samples:
+                return None
+        self._has_emitted = True
+        self._samples_since_emit = 0
+        output = self._samples.copy()
+        if self.peak_normalize:
+            peak = float(np.max(np.abs(output)))
+            if peak > 0.0:
+                output /= peak
+        return np.clip(output, -1.0, 1.0).astype(np.float32, copy=False)
+
+
 def prepare_audio_waveform(
     frame: AudioFrame,
     *,

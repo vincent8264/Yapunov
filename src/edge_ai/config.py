@@ -30,9 +30,11 @@ from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
 from edge_ai.pipeline import Pipeline
 from edge_ai.notifications import AsyncNotifier, Notifier, NotifyingHardware, SMTPNotifier
 from edge_ai.preprocessing.audio import (
+    RollingAudioWindow,
     SlidingAudioWindow,
     extract_audio_features,
     prepare_audio_waveform,
+    resample_audio_frame,
 )
 from edge_ai.preprocessing.sensor import normalize_sensor
 from edge_ai.settings import (
@@ -281,11 +283,19 @@ def _build_preprocessor(section: Mapping[str, Any]) -> Callable[[Any], Any]:
         from edge_ai.preprocessing.image import preprocess_image
 
         return partial(preprocess_image, size=(size[0], size[1]), normalize=normalize)
-    if component_type in {"audio_waveform", "audio_features", "audio_sliding_window"}:
+    if component_type in {
+        "audio_waveform",
+        "audio_features",
+        "audio_sliding_window",
+        "audio_rolling_window",
+        "audio_resample",
+    }:
         sample_rate = _integer(section, "sample_rate", 16_000)
-        duration_seconds = _number(section, "duration_seconds", 1.0)
         if sample_rate < 1:
             raise ConfigError("[preprocessing].sample_rate must be positive")
+        if component_type == "audio_resample":
+            return partial(resample_audio_frame, sample_rate=sample_rate)
+        duration_seconds = _number(section, "duration_seconds", 1.0)
         if duration_seconds <= 0.0:
             raise ConfigError("[preprocessing].duration_seconds must be positive")
         if component_type == "audio_waveform":
@@ -301,6 +311,20 @@ def _build_preprocessor(section: Mapping[str, Any]) -> Callable[[Any], Any]:
                 window_seconds=duration_seconds,
                 peak_normalize=_boolean(section, "peak_normalize", False),
             )
+        if component_type == "audio_rolling_window":
+            try:
+                return RollingAudioWindow(
+                    sample_rate=sample_rate,
+                    window_seconds=duration_seconds,
+                    hop_seconds=(
+                        _number(section, "hop_seconds", duration_seconds)
+                        if "hop_seconds" in section
+                        else None
+                    ),
+                    peak_normalize=_boolean(section, "peak_normalize", False),
+                )
+            except ValueError as exc:
+                raise ConfigError(f"invalid [preprocessing] configuration: {exc}") from exc
         return partial(
             extract_audio_features,
             sample_rate=sample_rate,
@@ -359,6 +383,20 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
                 background_threshold=_number(section, "background_threshold", 0.1),
             )
         except (FileNotFoundError, ValueError) as exc:
+            raise ConfigError(str(exc)) from exc
+    if component_type == "whisper_audio_caption":
+        model_dir = section.get("model_dir")
+        if not isinstance(model_dir, str) or not model_dir:
+            raise ConfigError("[inference].model_dir must be a non-empty path")
+        from edge_ai.inference.audio_caption import WhisperAudioCaptionInferenceEngine
+
+        try:
+            return WhisperAudioCaptionInferenceEngine(
+                (config_dir / model_dir).resolve(),
+                style=_required_string(section, "style", "inference"),
+                max_new_tokens=_integer(section, "max_new_tokens", 64),
+            )
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
             raise ConfigError(str(exc)) from exc
     if component_type == "keyword_spotter":
         model = section.get("model")

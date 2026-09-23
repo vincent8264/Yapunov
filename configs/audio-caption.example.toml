@@ -1,0 +1,34 @@
+# Laptop-only WAV-captioning workflow for MU-NLPC Whisper Small Audio Captioning.
+# This optional model is not included in the repository or UNO Q package.
+# Edit both paths, then run with --max-steps 1.
+[runtime]
+interval_seconds = 0.0
+
+[input]
+type = "wav"
+paths = ["../sample.wav"]
+loop = false
+
+[preprocessing]
+# Keep the complete clip (up to the model's 30-second maximum), rather than
+# padding a one-second waveform as the live YAMNet pipeline does.
+type = "audio_resample"
+sample_rate = 16000
+
+[inference]
+type = "whisper_audio_caption"
+model_dir = "../models/whisper-small-audio-captioning"
+style = "clotho"
+max_new_tokens = 64
+
+[decision]
+type = "default"
+
+[hardware]
+type = "mock"
+verbose = false
+
+[notifications]
+type = "none"
+device_name = "Laptop audio-caption test"
+timezone = "America/Los_Angeles"

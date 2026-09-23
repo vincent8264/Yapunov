@@ -41,6 +41,8 @@ class Pipeline:
             if data is None:
                 return None
         processed = self.preprocessor(data)
+        if processed is None:
+            return None
         result = self.inference.predict(processed)
         decision = self.decision_function(result)
         self.hardware.apply_decision(decision)

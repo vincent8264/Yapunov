@@ -1,0 +1,38 @@
+# Laptop-only live microphone evaluation for Whisper Small Audio Captioning.
+# It is not an UNO Q deployment and never drives alerts or notifications.
+[runtime]
+interval_seconds = 0.0
+
+[input]
+type = "microphone"
+# Use a verified microphone name/index only in an untracked local copy. Set the
+# capture rate to a rate the selected microphone actually supports.
+sample_rate = 16000
+duration_seconds = 1.0
+
+[preprocessing]
+# Gather five one-second microphone frames. The first caption occurs once the
+# window is full, then the captioner runs after each additional five seconds.
+type = "audio_rolling_window"
+sample_rate = 16000
+duration_seconds = 5.0
+hop_seconds = 5.0
+peak_normalize = false
+
+[inference]
+type = "whisper_audio_caption"
+model_dir = "../models/whisper-small-audio-captioning"
+style = "clotho"
+max_new_tokens = 64
+
+[decision]
+type = "default"
+
+[hardware]
+type = "mock"
+verbose = false
+
+[notifications]
+type = "none"
+device_name = "Laptop live audio-caption test"
+timezone = "America/Los_Angeles"

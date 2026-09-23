@@ -128,3 +128,27 @@ def test_evaluate_keyword_command_dispatches(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result == 0
     assert calls == [(Path("clips"), Path("help.onnx"), 0.7, 0)]
+
+
+def test_caption_audio_command_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(cli, "_caption_audio", lambda *args: calls.append(args))
+
+    result = cli.main(
+        [
+            "caption-audio",
+            "one.wav",
+            "two.wav",
+            "--model-dir",
+            "models/caption",
+            "--style",
+            "audioset",
+            "--max-new-tokens",
+            "24",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [
+        ([Path("one.wav"), Path("two.wav")], Path("models/caption"), "audioset", 24)
+    ]
