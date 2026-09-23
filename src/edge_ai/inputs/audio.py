@@ -33,6 +33,93 @@ class AudioFrame:
         object.__setattr__(self, "samples", samples)
 
 
+class MicrophoneHealthError(RuntimeError):
+    """A locally observed microphone failure or persistently unusable signal."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class MicrophoneHealthInput(InputSource):
+    """Validate microphone frames without claiming a specific physical failure.
+
+    A missing stream, digital silence, and a frozen capture buffer can look alike from
+    software.  This wrapper therefore reports the observation and possible causes
+    rather than asserting that the microphone hardware is broken.
+    """
+
+    def __init__(
+        self,
+        source: InputSource,
+        *,
+        failure_seconds: float = 5.0,
+        silence_threshold: float = 0.0,
+        detect_frozen: bool = True,
+    ) -> None:
+        if failure_seconds <= 0.0:
+            raise ValueError("microphone health failure_seconds must be positive")
+        if not 0.0 <= silence_threshold <= 1.0:
+            raise ValueError("microphone health silence_threshold must be between 0 and 1")
+        self.source = source
+        self.failure_seconds = failure_seconds
+        self.silence_threshold = silence_threshold
+        self.detect_frozen = detect_frozen
+        self._silent_seconds = 0.0
+        self._frozen_seconds = 0.0
+        self._previous: AudioFrame | None = None
+
+    def read(self) -> AudioFrame:
+        try:
+            frame = self.source.read()
+        except (OSError, RuntimeError) as exc:
+            raise MicrophoneHealthError(
+                "unavailable",
+                f"microphone read failed: {type(exc).__name__}: {exc}",
+            ) from exc
+        if not isinstance(frame, AudioFrame):
+            raise MicrophoneHealthError(
+                "invalid_audio",
+                f"microphone returned {type(frame).__name__} instead of an AudioFrame",
+            )
+
+        duration_seconds = frame.samples.size / frame.sample_rate
+        peak = float(np.max(np.abs(frame.samples)))
+        self._silent_seconds = (
+            self._silent_seconds + duration_seconds
+            if peak <= self.silence_threshold
+            else 0.0
+        )
+
+        repeated = (
+            self.detect_frozen
+            and self._previous is not None
+            and frame.sample_rate == self._previous.sample_rate
+            and np.array_equal(frame.samples, self._previous.samples)
+        )
+        self._frozen_seconds = self._frozen_seconds + duration_seconds if repeated else 0.0
+        self._previous = frame
+
+        if self._silent_seconds >= self.failure_seconds:
+            raise MicrophoneHealthError(
+                "no_signal",
+                f"microphone produced no signal for {self._silent_seconds:.1f} seconds; "
+                "it may be muted, disconnected, or unavailable",
+            )
+        if self._frozen_seconds >= self.failure_seconds:
+            raise MicrophoneHealthError(
+                "frozen_signal",
+                f"microphone repeated an identical audio buffer for "
+                f"{self._frozen_seconds:.1f} seconds; capture may be stalled",
+            )
+        return frame
+
+    def close(self) -> None:
+        close = getattr(self.source, "close", None)
+        if callable(close):
+            close()
+
+
 def _decode_pcm(payload: bytes, sample_width: int) -> np.ndarray:
     if sample_width == 1:
         return (np.frombuffer(payload, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0

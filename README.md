@@ -137,6 +137,14 @@ display contains no raw audio and does not affect classification. Confirmed dang
 icons stay visible for five seconds in the live configurations before the spectrum
 resumes.
 
+The canonical UNO Q configuration also enables conservative microphone health
+checks. Five seconds of exact digital zeroes is reported as `no_signal`, while an
+exactly repeated nonzero capture buffer is reported as `frozen_signal`. Read errors
+are reported as `unavailable`. These observations can indicate a muted, disconnected,
+or stalled input, but they do not prove that the microphone hardware is broken. The
+zero-level threshold deliberately avoids guessing the noise floor before measurements
+are taken on the event microphone; increase it only after room calibration.
+
 Stop it with Ctrl+C, or run a fixed number of iterations:
 
 ```bash

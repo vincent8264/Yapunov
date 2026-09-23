@@ -21,6 +21,7 @@ from edge_ai.inference.dummy import DummyInferenceEngine
 from edge_ai.inference.spectral import SpectralSoundInferenceEngine
 from edge_ai.inputs.audio import (
     ArduinoMicrophoneInput,
+    MicrophoneHealthInput,
     MicrophoneInput,
     SimulatedSoundInput,
     WavAudioInput,
@@ -172,16 +173,42 @@ def _build_input(
             isinstance(device, bool) or not isinstance(device, (str, int))
         ):
             raise ConfigError("[input].device must be a device name or integer index")
+        health = section.get("health")
+        health_enabled = False
+        health_failure_seconds = 5.0
+        health_silence_threshold = 0.0
+        health_detect_frozen = True
+        if health is not None:
+            if not isinstance(health, dict):
+                raise ConfigError("[input].health must be a table")
+            health_enabled = _boolean(health, "enabled", False)
+            health_failure_seconds = _number(health, "failure_seconds", 5.0)
+            health_silence_threshold = _number(health, "silence_threshold", 0.0)
+            health_detect_frozen = _boolean(health, "detect_frozen", True)
+            if health_failure_seconds <= 0.0:
+                raise ConfigError("[input].health.failure_seconds must be positive")
+            if not 0.0 <= health_silence_threshold <= 1.0:
+                raise ConfigError(
+                    "[input].health.silence_threshold must be between 0 and 1"
+                )
         microphone_type = (
             MicrophoneInput if component_type == "microphone" else ArduinoMicrophoneInput
         )
         try:
-            return microphone_type(
+            source = microphone_type(
                 sample_rate=_integer(section, "sample_rate", 16_000),
                 duration_seconds=frame_duration_seconds
                 if frame_duration_seconds is not None
                 else _number(section, "duration_seconds", 1.0),
                 device=device,
+            )
+            if not health_enabled:
+                return source
+            return MicrophoneHealthInput(
+                source,
+                failure_seconds=health_failure_seconds,
+                silence_threshold=health_silence_threshold,
+                detect_frozen=health_detect_frozen,
             )
         except (RuntimeError, ValueError) as exc:
             raise ConfigError(f"invalid [input] configuration: {exc}") from exc

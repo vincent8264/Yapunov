@@ -10,7 +10,7 @@ from edge_ai.config import (
     load_notification_config,
 )
 from edge_ai.hardware.mock import MockHardware
-from edge_ai.inputs.audio import SimulatedSoundInput
+from edge_ai.inputs.audio import MicrophoneHealthInput, SimulatedSoundInput
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
 from edge_ai.notifications import SMTPNotifier
 from edge_ai.settings import NotificationPreferences, save_notification_preferences
@@ -159,6 +159,36 @@ def test_board_microphone_display_uses_twenty_hz_chunks(
     assert configured.pipeline.audio_spectrum is not None
     assert configured.pipeline.audio_spectrum.inference_hop_seconds == 0.2
     assert captured["duration_seconds"] == 0.05
+    assert isinstance(configured.pipeline.input_source, MicrophoneHealthInput)
+
+
+def test_microphone_health_rejects_invalid_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "health.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "microphone"
+[input.health]
+enabled = true
+silence_threshold = 1.1
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "dummy"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("edge_ai.config.MicrophoneInput", lambda **_: object())
+
+    with pytest.raises(ConfigError, match="silence_threshold"):
+        load_config(path)
 
 
 def test_live_display_accepts_a_shorter_inference_hop(
