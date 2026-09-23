@@ -219,6 +219,11 @@ class MicrophoneHealthInput(InputSource):
 
     def close(self) -> None:
         self.source_factory = None
+        if self._fault is not None and not self.reopen_on_fault:
+            # App Lab's stop() can block after USB removal. Let container teardown
+            # release the invalid ALSA handle instead of trapping the Python process
+            # in cleanup and leaving the next app unable to claim the microphone.
+            return
         self._close_source(suppress_errors=False)
 
 

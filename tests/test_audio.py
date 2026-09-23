@@ -299,6 +299,21 @@ def test_microphone_health_recovers_when_existing_source_resumes() -> None:
     assert delegate.closed is False
 
 
+def test_faulted_app_lab_style_input_does_not_block_in_close() -> None:
+    delegate = _FrameInput([RuntimeError("device disappeared")])
+    source = MicrophoneHealthInput(
+        delegate,
+        source_factory=lambda: delegate,
+        reopen_on_fault=False,
+    )
+
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+    source.close()
+
+    assert delegate.closed is False
+
+
 def test_microphone_health_retries_initial_open_failure() -> None:
     now = [0.0]
     recovered_frame = AudioFrame(np.array([0.02, -0.02], dtype=np.float32), 2)
