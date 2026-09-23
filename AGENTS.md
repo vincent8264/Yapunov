@@ -31,6 +31,15 @@ must not require network access after dependencies and models are installed.
 ## Configuration
 
 - Use TOML files under `configs/`; avoid adding a YAML dependency.
+- Treat `configs/sound-uno-q.toml` as the single canonical UNO Q deployment config.
+  Do not add separate live, simulated, model-test, notification, or packaging copies
+  of it. Build test variants in temporary test fixtures or generate them inside the
+  packaging script.
+- Reuse an existing TOML when only a device selector, threshold, or test input changes.
+  A new committed config must represent a distinct user-facing workflow, not a
+  one-off experiment, and its purpose must be added to the README configuration table.
+- Keep machine-specific experiments untracked. Use an `.example.toml` only when users
+  must supply private settings or an optional model that is not part of the repository.
 - Keep component factories explicit in `src/edge_ai/config.py`. Do not build a dynamic
   plugin system unless the challenge clearly needs one.
 - Fail at startup with useful messages for missing sections, unsupported types, bad
