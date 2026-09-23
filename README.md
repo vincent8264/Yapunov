@@ -291,8 +291,12 @@ timezone = "America/Los_Angeles"
 status_log = true
 ```
 
-The private file is explicitly ignored by Git. Set the named password environment
-variable separately rather than writing the password into TOML:
+The private file is explicitly ignored by Git. The preferred approach is to set the
+named password environment variable separately. For a single-file local setup, the
+packager also accepts `password = "your-app-password"` in this ignored private file.
+It removes that value from the packaged TOML and writes it to the private app's
+`python/smtp-password` file instead. Never commit or share the private config or the
+generated email ZIP.
 
 ```bash
 export EDGE_AI_SMTP_PASSWORD='your-smtp-app-password'
@@ -408,7 +412,9 @@ To send email from the board as well, first confirm delivery from the laptop wit
 
 ```bash
 export EDGE_AI_SMTP_PASSWORD='your-smtp-app-password'
-uv run python scripts/package_app_lab.py --notifications configs/private-live.toml
+uv run python scripts/package_app_lab.py \
+  --config configs/help-uno-q-live.toml \
+  --notifications configs/private-live.toml
 ```
 
 This writes `dist/private-sound-alerts-live-email.zip`. It copies the `[notifications]`

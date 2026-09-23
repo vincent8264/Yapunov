@@ -201,6 +201,26 @@ def test_email_zip_requires_password(tmp_path: Path) -> None:
         _MODULE.package_app(tmp_path / "dist", notifications_config=private, password=None)
 
 
+def test_packager_reads_literal_password_only_from_ignored_private_config(
+    tmp_path: Path,
+) -> None:
+    private = tmp_path / "private-live.toml"
+    private.write_text(
+        _PRIVATE_CONFIG + '\npassword = "saved-local-secret"\n',
+        encoding="utf-8",
+    )
+
+    assert _MODULE._password_for(private) == "saved-local-secret"
+
+
+def test_packager_rejects_empty_literal_password(tmp_path: Path) -> None:
+    private = tmp_path / "private-live.toml"
+    private.write_text(_PRIVATE_CONFIG + '\npassword = ""\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-empty"):
+        _MODULE._password_for(private)
+
+
 def test_yamnet_zip_bundles_model_labels_and_synthetic_wavs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -4,8 +4,10 @@ Pass ``--config`` to choose the board pipeline; models referenced anywhere below
 its ``[inference]`` section are bundled under ``python/models/``. Pass
 ``--notifications`` with a private SMTP config to enable email on the board, or
 ``--mode yamnet-test`` to replay bundled WAV fixtures through YAMNet.
-The SMTP password is read from that config's ``password_env`` variable and written
-only to ``python/smtp-password`` inside the git-ignored ``dist/`` output.
+The SMTP password is read from the ignored private config's local ``password`` value,
+or from its ``password_env`` variable, and written only to ``python/smtp-password``
+inside the git-ignored ``dist/`` output. The literal password is never copied into the
+board TOML.
 """
 
 import argparse
@@ -124,8 +126,9 @@ def _board_notifications(config_path: Path, password: str | None) -> tuple[str, 
         return "\n".join(lines) + "\n", None
     if not password:
         raise ValueError(
-            "the SMTP password is required: set the environment variable named by "
-            f"[notifications].password_env in {config_path}"
+            "the SMTP password is required: set [notifications].password in the "
+            f"ignored {config_path}, or set the environment variable named by "
+            "[notifications].password_env"
         )
     lines.append(f'password_file = "{PASSWORD_FILE_NAME}"')
     return "\n".join(lines) + "\n", password
@@ -331,7 +334,14 @@ def package_app(
 def _password_for(config_path: Path) -> str | None:
     with config_path.open("rb") as file:
         section = tomllib.load(file).get("notifications", {})
-    name = section.get("password_env") if isinstance(section, dict) else None
+    if not isinstance(section, dict):
+        return None
+    password = section.get("password")
+    if password is not None:
+        if not isinstance(password, str) or not password:
+            raise ValueError("[notifications].password must be a non-empty string")
+        return password
+    name = section.get("password_env")
     return os.environ.get(name) if isinstance(name, str) else None
 
 
