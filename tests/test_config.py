@@ -10,6 +10,7 @@ from edge_ai.config import (
     load_notification_config,
 )
 from edge_ai.hardware.mock import MockHardware
+from edge_ai.inputs.audio import MicrophoneHealthInput
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
 from edge_ai.notifications import SMTPNotifier
 from edge_ai.settings import NotificationPreferences, save_notification_preferences
@@ -68,6 +69,42 @@ type = "mock"
 
     with pytest.raises(ConfigError, match="device must be"):
         load_config(path)
+
+
+def test_health_enabled_microphone_open_failure_becomes_runtime_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "health-live.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "microphone"
+[input.health]
+enabled = true
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "dummy"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    def unavailable_microphone(**_: object) -> object:
+        raise RuntimeError("microphone is already in use")
+
+    monkeypatch.setattr("edge_ai.config.MicrophoneInput", unavailable_microphone)
+
+    configured = load_config(path)
+
+    assert isinstance(configured.pipeline.input_source, MicrophoneHealthInput)
+    assert configured.pipeline.input_source.source is None
+    assert configured.pipeline.step() is None
+    assert configured.pipeline.hardware.current_alert == "microphone_fault"
 
 
 def test_uno_q_sound_config_is_live_yamnet() -> None:
@@ -141,6 +178,57 @@ def test_board_microphone_display_uses_twenty_hz_chunks(
     assert configured.pipeline.audio_spectrum is not None
     assert configured.pipeline.audio_spectrum.inference_hop_seconds == 0.2
     assert captured["duration_seconds"] == 0.05
+    assert isinstance(configured.pipeline.input_source, MicrophoneHealthInput)
+    assert configured.pipeline.input_source.source_factory is not None
+    assert configured.pipeline.input_source.reopen_on_fault is False
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("silence_threshold", "1.1"),
+        ("failure_seconds", "0.0"),
+        ("retry_interval_seconds", "0.0"),
+    ],
+)
+def test_microphone_health_rejects_invalid_ranges_before_opening_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str,
+    value: str,
+) -> None:
+    path = tmp_path / "health.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "microphone"
+[input.health]
+enabled = true
+{setting} = {value}
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "dummy"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""".format(setting=setting, value=value),
+        encoding="utf-8",
+    )
+    opened = False
+
+    def fake_microphone(**_: object) -> object:
+        nonlocal opened
+        opened = True
+        return object()
+
+    monkeypatch.setattr("edge_ai.config.MicrophoneInput", fake_microphone)
+
+    with pytest.raises(ConfigError, match=setting):
+        load_config(path)
+    assert opened is False
 
 
 def test_live_display_accepts_a_shorter_inference_hop(

@@ -104,6 +104,35 @@ display contains no raw audio and does not affect classification. Confirmed dang
 icons stay visible for five seconds in the live configurations before the spectrum
 resumes.
 
+The canonical UNO Q configuration also enables conservative microphone health
+checks. Five seconds of exact digital zeroes is reported as `no_signal`, while an
+exactly repeated nonzero capture buffer is reported as `frozen_signal`. Read errors
+are reported as `unavailable`. These observations can indicate a muted, disconnected,
+or stalled input, but they do not prove that the microphone hardware is broken. The
+zero-level threshold deliberately avoids guessing the noise floor before measurements
+are taken on the event microphone; increase it only after room calibration.
+
+After a runtime fault, the pipeline remains alive and displays a crossed-microphone
+icon. On the UNO Q it continues polling the existing App Lab microphone object so
+App Lab's ALSA adapter can perform its own USB hot-plug retries. The desktop input is
+recreated every two seconds instead. Recovery requires a usable nonzero frame; a
+frozen-input recovery also requires the next frame to change. With SMTP notifications
+enabled, the first fault sends one metadata-only warning, the matrix status column
+lights after delivery, and a later recovery sends one follow-up email. Repeated retry
+failures do not generate duplicate messages.
+
+If the microphone is absent or still claimed by an earlier process when the app
+starts, the health wrapper also keeps the pipeline alive and retries opening it every
+two seconds. This startup case uses the same fault icon and notification transition
+instead of terminating the App Lab container.
+
+For the physical demo, start with the live spectrum visible, unplug only the USB
+microphone, and leave the UNO Q and powered hub connected. Verify the fault icon and
+warning email, reconnect the microphone, make a short sound, and verify that the
+spectrum and inference resume before checking the recovery email. USB removal and
+re-enumeration still require validation against the App Lab version and event hardware;
+do not claim reconnection until this exact sequence has passed on the board.
+
 Stop it with Ctrl+C, or run a fixed number of iterations:
 
 ```bash

@@ -84,3 +84,14 @@ def test_matrix_preview_blinks_icon_against_background_and_shows_email_bar() -> 
     preview.clear_alert()
     assert _pixel_fill(preview, 12, 0) == status_off
     preview.shutdown()
+
+
+def test_matrix_preview_shows_and_clears_microphone_fault() -> None:
+    preview = MatrixPreviewHardware(tk_module=FakeTk, pixel_size=8, clock=lambda: 0.0)
+
+    preview.show_input_fault("unavailable", "USB microphone disappeared")
+    assert preview._alert_event == "microphone_fault"  # type: ignore[attr-defined]
+
+    preview.clear_input_fault("unavailable")
+    assert preview._alert_event is None  # type: ignore[attr-defined]
+    preview.shutdown()

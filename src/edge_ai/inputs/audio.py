@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 import queue
@@ -31,6 +32,199 @@ class AudioFrame:
         if isinstance(self.sample_rate, bool) or self.sample_rate < 1:
             raise ValueError("audio sample_rate must be a positive integer")
         object.__setattr__(self, "samples", samples)
+
+
+class MicrophoneHealthError(RuntimeError):
+    """A locally observed microphone failure or persistently unusable signal."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class MicrophoneHealthInput(InputSource):
+    """Validate microphone frames without claiming a specific physical failure.
+
+    A missing stream, digital silence, and a frozen capture buffer can look alike from
+    software.  This wrapper therefore reports the observation and possible causes
+    rather than asserting that the microphone hardware is broken.
+    """
+
+    def __init__(
+        self,
+        source: InputSource | None,
+        *,
+        source_factory: Callable[[], InputSource] | None = None,
+        reopen_on_fault: bool = True,
+        initial_error: Exception | None = None,
+        failure_seconds: float = 5.0,
+        silence_threshold: float = 0.0,
+        detect_frozen: bool = True,
+        retry_interval_seconds: float = 2.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if failure_seconds <= 0.0:
+            raise ValueError("microphone health failure_seconds must be positive")
+        if not 0.0 <= silence_threshold <= 1.0:
+            raise ValueError("microphone health silence_threshold must be between 0 and 1")
+        if retry_interval_seconds <= 0.0:
+            raise ValueError("microphone health retry_interval_seconds must be positive")
+        if source is None and source_factory is None:
+            raise ValueError("microphone health requires a source or source_factory")
+        self.source: InputSource | None = source
+        self.source_factory = source_factory
+        self.reopen_on_fault = reopen_on_fault
+        self.failure_seconds = failure_seconds
+        self.silence_threshold = silence_threshold
+        self.detect_frozen = detect_frozen
+        self.retry_interval_seconds = retry_interval_seconds
+        self._clock = clock
+        self._silent_seconds = 0.0
+        self._frozen_seconds = 0.0
+        self._previous: AudioFrame | None = None
+        self._fault: MicrophoneHealthError | None = (
+            MicrophoneHealthError(
+                "unavailable",
+                f"microphone open failed: {type(initial_error).__name__}: {initial_error}",
+            )
+            if initial_error is not None
+            else None
+        )
+        self._recovered_reason: str | None = None
+        self._next_retry_at = (
+            self._clock() + self.retry_interval_seconds
+            if initial_error is not None
+            else 0.0
+        )
+
+    def _close_source(self, *, suppress_errors: bool) -> None:
+        if self.source is None:
+            return
+        close = getattr(self.source, "close", None)
+        try:
+            if callable(close):
+                close()
+        except Exception:
+            # A disconnected capture device can also fail during close. The read
+            # failure remains the useful diagnosis and retries must still continue.
+            if not suppress_errors:
+                raise
+        finally:
+            self.source = None
+
+    def _mark_fault(self, reason: str, message: str) -> MicrophoneHealthError:
+        fault = MicrophoneHealthError(reason, message)
+        if self._fault is None:
+            self._fault = fault
+        self._silent_seconds = 0.0
+        self._frozen_seconds = 0.0
+        self._previous = None
+        if self.source_factory is not None and (
+            self.source is None or self.reopen_on_fault
+        ):
+            self._next_retry_at = self._clock() + self.retry_interval_seconds
+        return fault
+
+    def _ensure_source(self) -> InputSource:
+        if (
+            self._fault is not None
+            and self.source_factory is not None
+            and (self.source is None or self.reopen_on_fault)
+        ):
+            if self._clock() < self._next_retry_at:
+                raise self._fault
+            # Report the fault before touching a disconnected peripheral. Some
+            # board runtimes can block in stop() after USB removal, so cleanup is
+            # intentionally deferred until the first reconnect attempt.
+            self._close_source(suppress_errors=True)
+            try:
+                self.source = self.source_factory()
+            except Exception as exc:
+                self._next_retry_at = self._clock() + self.retry_interval_seconds
+                raise MicrophoneHealthError(
+                    "unavailable",
+                    f"microphone reconnect failed: {type(exc).__name__}: {exc}",
+                ) from exc
+            return self.source
+        if self.source is not None:
+            return self.source
+        if self.source_factory is None or self._fault is None:
+            raise RuntimeError("microphone input is closed")
+        raise self._fault
+
+    def take_recovered_reason(self) -> str | None:
+        """Return one recovery transition after a healthy frame resumes."""
+        reason, self._recovered_reason = self._recovered_reason, None
+        return reason
+
+    def read(self) -> AudioFrame:
+        try:
+            frame = self._ensure_source().read()
+        except MicrophoneHealthError:
+            raise
+        except Exception as exc:
+            raise self._mark_fault(
+                "unavailable", f"microphone read failed: {type(exc).__name__}: {exc}"
+            ) from exc
+        if not isinstance(frame, AudioFrame):
+            raise self._mark_fault(
+                "invalid_audio",
+                f"microphone returned {type(frame).__name__} instead of an AudioFrame",
+            )
+
+        duration_seconds = frame.samples.size / frame.sample_rate
+        peak = float(np.max(np.abs(frame.samples)))
+        self._silent_seconds = (
+            self._silent_seconds + duration_seconds
+            if peak <= self.silence_threshold
+            else 0.0
+        )
+
+        repeated = (
+            self.detect_frozen
+            and self._previous is not None
+            and frame.sample_rate == self._previous.sample_rate
+            and np.array_equal(frame.samples, self._previous.samples)
+        )
+        previous = self._previous
+        self._frozen_seconds = self._frozen_seconds + duration_seconds if repeated else 0.0
+        self._previous = frame
+
+        if self._fault is not None:
+            usable_signal = peak > self.silence_threshold
+            changing_signal = previous is not None and not repeated
+            if not usable_signal or (
+                self._fault.reason == "frozen_signal" and not changing_signal
+            ):
+                raise self._fault
+            self._recovered_reason = self._fault.reason
+            self._fault = None
+            self._silent_seconds = 0.0
+            self._frozen_seconds = 0.0
+            return frame
+
+        if self._silent_seconds >= self.failure_seconds:
+            raise self._mark_fault(
+                "no_signal",
+                f"microphone produced no signal for {self._silent_seconds:.1f} seconds; "
+                "it may be muted, disconnected, or unavailable",
+            )
+        if self._frozen_seconds >= self.failure_seconds:
+            raise self._mark_fault(
+                "frozen_signal",
+                f"microphone repeated an identical audio buffer for "
+                f"{self._frozen_seconds:.1f} seconds; capture may be stalled",
+            )
+        return frame
+
+    def close(self) -> None:
+        self.source_factory = None
+        if self._fault is not None and not self.reopen_on_fault:
+            # App Lab's stop() can block after USB removal. Let container teardown
+            # release the invalid ALSA handle instead of trapping the Python process
+            # in cleanup and leaving the next app unable to claim the microphone.
+            return
+        self._close_source(suppress_errors=False)
 
 
 def _decode_pcm(payload: bytes, sample_width: int) -> np.ndarray:
