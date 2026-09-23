@@ -57,8 +57,10 @@ status_log = true
 # Generate a token once, for example with:
 #   export EDGE_AI_HEARTBEAT_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 [heartbeat]
-# The server computer's LAN address, reachable from the UNO Q (not localhost).
-url = "http://192.0.2.10:8090/heartbeat"
+# "auto" makes the packager use this computer's current LAN address and the
+# [heartbeat_server] port. Rebuild the ZIP after changing networks, or set an
+# explicit URL such as "http://192.0.2.10:8090/heartbeat" for a separate server.
+url = "auto"
 device_id = "home-sound-monitor"
 token_env = "EDGE_AI_HEARTBEAT_TOKEN"
 interval_seconds = 60.0

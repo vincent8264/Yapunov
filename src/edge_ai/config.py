@@ -16,7 +16,7 @@ from edge_ai.hardware.base import HardwareBackend
 from edge_ai.hardware.mock import MockHardware
 from edge_ai.hardware.matrix_preview import MatrixPreviewHardware
 from edge_ai.hardware.uno_q import UnoQHardware
-from edge_ai.heartbeat import DEVICE_ID_PATTERN, HeartbeatSender
+from edge_ai.heartbeat import AUTO_URL, DEVICE_ID_PATTERN, HeartbeatSender, heartbeat_url
 from edge_ai.inference.base import InferenceEngine, InferenceResult
 from edge_ai.inference.dummy import DummyInferenceEngine
 from edge_ai.inference.spectral import SpectralSoundInferenceEngine
@@ -74,6 +74,7 @@ class HeartbeatServerConfig:
     notifier: Notifier
     device_name: str
     local_timezone: tzinfo
+    device_url: str = AUTO_URL
 
 
 @dataclass(frozen=True)
@@ -748,10 +749,26 @@ def _heartbeat_token(section: Mapping[str, Any], config_dir: Path) -> str:
     return token
 
 
-def _build_heartbeat(section: Mapping[str, Any], config_dir: Path) -> HeartbeatSender | None:
+def _heartbeat_server_port(document: Mapping[str, Any]) -> int:
+    server = document.get("heartbeat_server", {})
+    if not isinstance(server, dict):
+        raise ConfigError("invalid [heartbeat_server] section")
+    port = _integer(server, "port", 8090)
+    if not 1 <= port <= 65_535:
+        raise ConfigError("[heartbeat_server].port must be between 1 and 65535")
+    return port
+
+
+def _build_heartbeat(
+    section: Mapping[str, Any], config_dir: Path, *, server_port: int
+) -> HeartbeatSender | None:
     if not _boolean(section, "enabled", True):
         return None
     url = _required_string(section, "url", "heartbeat")
+    if url == AUTO_URL:
+        # The packager replaces "auto" with the server's LAN address; a direct run
+        # of this config is on the server computer itself.
+        url = heartbeat_url("127.0.0.1", server_port)
     device_id = _heartbeat_device_id(section)
     token = _heartbeat_token(section, config_dir)
     interval_seconds = _number(section, "interval_seconds", 60.0)
@@ -863,9 +880,10 @@ def load_heartbeat_server_config(path: Path) -> HeartbeatServerConfig:
     host = server.get("host", "127.0.0.1")
     if not isinstance(host, str) or not host:
         raise ConfigError("[heartbeat_server].host must be a non-empty string")
-    port = _integer(server, "port", 8090)
-    if not 1 <= port <= 65_535:
-        raise ConfigError("[heartbeat_server].port must be between 1 and 65535")
+    port = _heartbeat_server_port(document)
+    device_url = heartbeat.get("url", AUTO_URL)
+    if not isinstance(device_url, str) or not device_url:
+        raise ConfigError("[heartbeat].url must be a non-empty string")
     configured = _build_notifier(_table(document, "notifications"), config_path.parent)
     if configured.notifier is None:
         raise ConfigError(
@@ -880,6 +898,7 @@ def load_heartbeat_server_config(path: Path) -> HeartbeatServerConfig:
         notifier=configured.notifier,
         device_name=configured.device_name,
         local_timezone=configured.local_timezone,
+        device_url=device_url,
     )
 
 
@@ -994,7 +1013,11 @@ def load_config(path: Path) -> ConfiguredPipeline:
         if heartbeat_section is not None:
             if not isinstance(heartbeat_section, dict):
                 raise ConfigError("invalid [heartbeat] section")
-            heartbeat = _build_heartbeat(heartbeat_section, config_path.parent)
+            heartbeat = _build_heartbeat(
+                heartbeat_section,
+                config_path.parent,
+                server_port=_heartbeat_server_port(document),
+            )
         pipeline = Pipeline(
             input_source=input_source,
             preprocessor=preprocessor,

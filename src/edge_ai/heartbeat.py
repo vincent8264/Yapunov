@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import json
 import re
+import socket
 import threading
 import time
 from typing import Final
@@ -13,6 +14,24 @@ from urllib.request import Request, urlopen
 DEVICE_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 HeartbeatPoster = Callable[[str, bytes, dict[str, str], float], None]
+AUTO_URL: Final = "auto"
+
+
+def detect_lan_address() -> str:
+    """Return this computer's address on its default-route network.
+
+    Connecting a UDP socket only selects a route; no packet is sent.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.connect(("192.0.2.1", 9))
+        address = probe.getsockname()[0]
+    if address.startswith(("0.", "127.")):
+        raise OSError("no network connection with a LAN address was found")
+    return address
+
+
+def heartbeat_url(host: str, port: int) -> str:
+    return f"http://{host}:{port}/heartbeat"
 
 
 def post_heartbeat(url: str, body: bytes, headers: dict[str, str], timeout: float) -> None:

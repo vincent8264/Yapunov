@@ -392,7 +392,11 @@ starts when the server starts, so a board that never comes up is also reported.
 
 To enable it, copy the `[heartbeat]` and `[heartbeat_server]` tables from
 `configs/private-live.example.toml` into your ignored `configs/private-live.toml`.
-Set `url` to the server computer's LAN address, then generate a shared token:
+With `url = "auto"`, the packager uses this computer's current LAN address and the
+server port, so the server must run on the computer that builds the ZIP. Rebuild
+and reimport the ZIP after changing networks; on startup, the server prints its
+current address, and it warns if an explicit `url` no longer matches that address.
+Then generate a shared token:
 
 ```bash
 export EDGE_AI_HEARTBEAT_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
