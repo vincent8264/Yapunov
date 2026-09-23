@@ -61,6 +61,8 @@ def _reload_notifications(_: NotificationPreferences) -> None:
 
 def _cleanup() -> None:
     hardware = _CONFIGURED.pipeline.hardware
+    if _CONFIGURED.heartbeat is not None:
+        _CONFIGURED.heartbeat.close()
     try:
         if _SETUP_SERVER is not None:
             _SETUP_SERVER.close()
@@ -104,6 +106,8 @@ def loop() -> None:
     global _READY
     if not _READY:
         _startup()
+        if _CONFIGURED.heartbeat is not None:
+            _CONFIGURED.heartbeat.start()
         _READY = True
     started = time.perf_counter()
     period = max(
@@ -111,6 +115,8 @@ def loop() -> None:
         _CONFIGURED.pipeline.poll_interval_seconds,
     )
     step_result = _CONFIGURED.pipeline.step()
+    if _CONFIGURED.heartbeat is not None:
+        _CONFIGURED.heartbeat.beat()
     # A spectrum-enabled pipeline returns only after it has assembled a full model
     # window; intervening calls still update the matrix visualization.
     if step_result is not None:

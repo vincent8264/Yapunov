@@ -203,6 +203,105 @@ model = "../models/help-kws.onnx"''',
     assert packaged["inference"]["keyword"]["model"] == "models/help-kws.onnx"
 
 
+_PRIVATE_HEARTBEAT = """
+[heartbeat]
+url = "http://192.0.2.10:8090/heartbeat"
+device_id = "kitchen-monitor"
+token_env = "TEST_HEARTBEAT_TOKEN"
+interval_seconds = 60.0
+
+[heartbeat_server]
+host = "0.0.0.0"
+"""
+
+
+def test_email_zip_bundles_heartbeat_token_outside_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEST_HEARTBEAT_TOKEN", "heartbeat-secret")
+    private = tmp_path / "private.toml"
+    private.write_text(_PRIVATE_CONFIG + _PRIVATE_HEARTBEAT, encoding="utf-8")
+
+    zip_path = _MODULE.package_app(
+        tmp_path / "dist",
+        config_path=_live_config(tmp_path / "fixture"),
+        notifications_config=private,
+        password="test-only-secret",
+    )
+
+    with zipfile.ZipFile(zip_path) as archive:
+        config_text = archive.read("python/sound-uno-q.toml").decode()
+        token = archive.read("python/heartbeat-token").decode()
+    board = tomllib.loads(config_text)
+    assert "heartbeat-secret" not in config_text
+    assert token.strip() == "heartbeat-secret"
+    assert board["heartbeat"] == {
+        "url": "http://192.0.2.10:8090/heartbeat",
+        "device_id": "kitchen-monitor",
+        "interval_seconds": 60.0,
+        "token_file": "heartbeat-token",
+    }
+    assert "heartbeat_server" not in board
+
+
+def test_heartbeat_zip_rejects_localhost_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEST_HEARTBEAT_TOKEN", "heartbeat-secret")
+    private = tmp_path / "private.toml"
+    private.write_text(
+        _PRIVATE_CONFIG + _PRIVATE_HEARTBEAT.replace("192.0.2.10", "127.0.0.1"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="localhost"):
+        _MODULE.package_app(
+            tmp_path / "dist",
+            config_path=_live_config(tmp_path / "fixture"),
+            notifications_config=private,
+            password="test-only-secret",
+        )
+
+
+def test_heartbeat_zip_requires_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("TEST_HEARTBEAT_TOKEN", raising=False)
+    private = tmp_path / "private.toml"
+    private.write_text(_PRIVATE_CONFIG + _PRIVATE_HEARTBEAT, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="heartbeat token is required"):
+        _MODULE.package_app(
+            tmp_path / "dist",
+            config_path=_live_config(tmp_path / "fixture"),
+            notifications_config=private,
+            password="test-only-secret",
+        )
+
+
+def test_disabled_heartbeat_is_not_bundled(tmp_path: Path) -> None:
+    private = tmp_path / "private.toml"
+    private.write_text(
+        _PRIVATE_CONFIG + _PRIVATE_HEARTBEAT.replace(
+            "[heartbeat]\n", "[heartbeat]\nenabled = false\n"
+        ),
+        encoding="utf-8",
+    )
+
+    zip_path = _MODULE.package_app(
+        tmp_path / "dist",
+        config_path=_live_config(tmp_path / "fixture"),
+        notifications_config=private,
+        password="test-only-secret",
+    )
+
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        board = tomllib.loads(archive.read("python/sound-uno-q.toml").decode())
+    assert "heartbeat" not in board
+    assert "python/heartbeat-token" not in names
+
+
 def test_email_zip_requires_password(tmp_path: Path) -> None:
     private = tmp_path / "private.toml"
     private.write_text(_PRIVATE_CONFIG, encoding="utf-8")

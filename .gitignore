@@ -12,5 +12,6 @@ Thumbs.db
 /configs/private-live.toml
 /configs/private.live.toml
 /data/notification-settings.json
+/data/heartbeat-token
 /data/evaluation/
 /data/help-kws/

@@ -10,6 +10,8 @@ from edge_ai.config import ConfiguredPipeline
 def _cleanup(configured: ConfiguredPipeline) -> None:
     hardware = configured.pipeline.hardware
     input_source = configured.pipeline.input_source
+    if configured.heartbeat is not None:
+        configured.heartbeat.close()
     try:
         hardware.shutdown()
     finally:
@@ -29,11 +31,16 @@ def run_pipeline(
         raise ValueError("max_steps must be at least 1")
 
     steps = 0
+    heartbeat = configured.heartbeat
     try:
         configured.pipeline.hardware.check_connection()
+        if heartbeat is not None:
+            heartbeat.start()
         while max_steps is None or steps < max_steps:
             started = time.perf_counter()
             step_result = configured.pipeline.step()
+            if heartbeat is not None:
+                heartbeat.beat()
             if step_result is None:
                 delay = max(configured.interval_seconds, configured.pipeline.poll_interval_seconds) - (
                     time.perf_counter() - started

@@ -9,7 +9,8 @@ to replay bundled WAV fixtures through YAMNet.
 The SMTP password is read from the ignored private config's local ``password`` value,
 or from its ``password_env`` variable, and written only to ``python/smtp-password``
 inside the git-ignored ``dist/`` output. The literal password is never copied into the
-board TOML.
+board TOML. An optional private ``[heartbeat]`` section is bundled the same way, with
+its token written to ``python/heartbeat-token``.
 """
 
 import argparse
@@ -20,6 +21,7 @@ import re
 import shutil
 import sys
 import tomllib
+from urllib.parse import urlsplit
 import wave
 import zipfile
 
@@ -34,6 +36,7 @@ BOARD_CONFIG_NAME = "sound-uno-q.toml"
 PASSWORD_FILE_NAME = "smtp-password"
 NOTIFICATION_SETTINGS_FILE_NAME = "../data/notification-settings.json"
 SETUP_PIN_FILE_NAME = "../data/setup-pin"
+HEARTBEAT_TOKEN_FILE_NAME = "heartbeat-token"
 YAMNET_TEST_MODE = "yamnet-test"
 ONNXRUNTIME_REQUIREMENT = "onnxruntime==1.30.0"
 
@@ -89,6 +92,15 @@ _COPIED_NOTIFICATION_KEYS = (
     "username",
     "starttls",
     "timeout_seconds",
+    "status_log",
+)
+
+_COPIED_HEARTBEAT_KEYS = (
+    "url",
+    "device_id",
+    "interval_seconds",
+    "timeout_seconds",
+    "stall_seconds",
     "status_log",
 )
 
@@ -150,6 +162,44 @@ def _board_notifications(config_path: Path, password: str | None) -> tuple[str, 
         f'pin_file = "{SETUP_PIN_FILE_NAME}"',
     ]
     return "\n".join(lines) + "\n", bundled_password
+
+
+def _board_heartbeat(config_path: Path) -> tuple[str, str] | None:
+    """Return a board ``[heartbeat]`` table and its token, or ``None`` if disabled."""
+    with config_path.open("rb") as file:
+        section = tomllib.load(file).get("heartbeat")
+    if section is None or (isinstance(section, dict) and section.get("enabled") is False):
+        return None
+    if not isinstance(section, dict):
+        raise ValueError(f"invalid [heartbeat] section in {config_path}")
+    url = section.get("url")
+    if not isinstance(url, str) or not url:
+        raise ValueError(f"[heartbeat].url is required in {config_path}")
+    if urlsplit(url).hostname in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError(
+            "[heartbeat].url points to localhost; on the board, use the heartbeat "
+            "server's LAN address"
+        )
+    token: str | None = None
+    token_env = section.get("token_env")
+    token_file = section.get("token_file")
+    if isinstance(token_env, str):
+        token = os.environ.get(token_env)
+    elif isinstance(token_file, str):
+        token_path = (config_path.parent / token_file).resolve()
+        if token_path.is_file():
+            token = token_path.read_text(encoding="utf-8")
+    token = token.strip() if token else None
+    if not token:
+        raise ValueError(
+            "the heartbeat token is required: set the environment variable named by "
+            f"[heartbeat].token_env, or point token_file at a non-empty file ({config_path})"
+        )
+    settings = {key: section[key] for key in _COPIED_HEARTBEAT_KEYS if key in section}
+    lines = ["[heartbeat]"]
+    lines += [f"{key} = {_toml_value(value)}" for key, value in settings.items()]
+    lines.append(f'token_file = "{HEARTBEAT_TOKEN_FILE_NAME}"')
+    return "\n".join(lines) + "\n", token
 
 
 def _board_config(source: str, config_path: Path, notifications: str | None) -> str:
@@ -264,10 +314,15 @@ def package_app(
 
     notifications: str | None = None
     bundled_password: str | None = None
+    heartbeat_token: str | None = None
     if notifications_config is not None:
         notifications, bundled_password = _board_notifications(
             notifications_config, password
         )
+        heartbeat = _board_heartbeat(notifications_config)
+        if heartbeat is not None:
+            notifications = f"{notifications}\n{heartbeat[0]}"
+            heartbeat_token = heartbeat[1]
     if mode == YAMNET_TEST_MODE:
         if not YAMNET_MODEL_SOURCE.is_file():
             raise ValueError(
@@ -333,6 +388,10 @@ def package_app(
         secret = python_dir / PASSWORD_FILE_NAME
         secret.write_text(bundled_password + "\n", encoding="utf-8")
         secret.chmod(0o600)
+    if heartbeat_token is not None:
+        token_path = python_dir / HEARTBEAT_TOKEN_FILE_NAME
+        token_path.write_text(heartbeat_token + "\n", encoding="utf-8")
+        token_path.chmod(0o600)
     shutil.copytree(
         PACKAGE_SOURCE,
         python_dir / "edge_ai",
