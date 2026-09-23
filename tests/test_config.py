@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import tomllib
 
 import pytest
@@ -123,6 +124,7 @@ def test_board_microphone_display_uses_twenty_hz_chunks(
 ) -> None:
     source = Path("configs/sound-uno-q.toml").read_text(encoding="utf-8")
     path = tmp_path / "board-display.toml"
+    source = re.sub(r"\[decision\.risks\.[\s\S]*?(?=^\[hardware\])", "", source, flags=re.M)
     path.write_text(
         source.replace('model = "../models/yamnet.onnx"\n', "")
         .replace('type = "yamnet"', 'type = "dummy"')
@@ -223,6 +225,124 @@ type = "mock"
     )
 
     with pytest.raises(ConfigError, match="thresholds must be between"):
+        load_config(path)
+
+
+_RISK_CONFIG = """
+[runtime]
+[input]
+type = "simulated_sound"
+events = ["background"]
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "{inference}"
+model = "../models/yamnet.onnx"
+[decision]
+type = "sound_events"
+thresholds = {{ smoke_alarm = 0.5 }}
+confirmations = 1
+[decision.risks.water_leak]
+message = "Possible water leak detected"
+labels = [{labels}]
+threshold = {threshold}
+[hardware]
+type = "mock"
+verbose = false
+"""
+
+
+def _risk_config_dir(tmp_path: Path) -> Path:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir(exist_ok=True)
+    models = tmp_path / "models"
+    models.mkdir(exist_ok=True)
+    repo_models = Path("models").resolve()
+    for name in ("yamnet.onnx", "yamnet_class_map.csv"):
+        target = models / name
+        if not target.exists() and (repo_models / name).exists():
+            target.symlink_to(repo_models / name)
+    return config_dir
+
+
+def _write_risk_config(
+    tmp_path: Path,
+    *,
+    inference: str = "yamnet",
+    labels: str = '"Drip", "Gush"',
+    threshold: str = "0.2",
+) -> Path:
+    path = _risk_config_dir(tmp_path) / "risk.toml"
+    path.write_text(
+        _RISK_CONFIG.format(inference=inference, labels=labels, threshold=threshold),
+        encoding="utf-8",
+    )
+    return path
+
+
+_HAS_YAMNET = Path("models/yamnet.onnx").is_file()
+
+
+@pytest.mark.skipif(not _HAS_YAMNET, reason="models/yamnet.onnx is not installed")
+def test_uno_q_config_builds_risk_warnings_around_emergency_policy(tmp_path: Path) -> None:
+    from edge_ai.risk_monitor import RiskWarningDecision
+    from edge_ai.sound_decision import SoundDecisionPolicy
+
+    source = Path("configs/sound-uno-q.toml").read_text(encoding="utf-8")
+    path = _risk_config_dir(tmp_path) / "sound-uno-q.toml"
+    path.write_text(
+        source.replace('type = "arduino_microphone"', 'type = "simulated_sound"')
+        .replace('type = "uno_q"', 'type = "mock"')
+        .split("[display]")[0],
+        encoding="utf-8",
+    )
+    configured = load_config(path)
+
+    decision = configured.pipeline.decision_function
+    assert isinstance(decision, RiskWarningDecision)
+    assert isinstance(decision.emergency_decision, SoundDecisionPolicy)
+    assert {rule.name: rule.message for rule in decision.monitor.rules} == {
+        "water_leak": "Possible water leak detected",
+    }
+    assert set(configured.pipeline.inference.watched_label_indices) == {
+        "Drip",
+        "Trickle, dribble",
+        "Gush",
+        "Water tap, faucet",
+    }
+    assert all(
+        0.0 < rule.min_detected_seconds <= rule.window_seconds
+        for rule in decision.monitor.rules
+    )
+
+
+@pytest.mark.skipif(not _HAS_YAMNET, reason="models/yamnet.onnx is not installed")
+def test_risk_label_missing_from_yamnet_is_rejected(tmp_path: Path) -> None:
+    path = _write_risk_config(tmp_path, labels='"Drip", "Kettle"')
+
+    with pytest.raises(ConfigError, match="'Kettle'"):
+        load_config(path)
+
+
+@pytest.mark.skipif(not _HAS_YAMNET, reason="models/yamnet.onnx is not installed")
+def test_risk_threshold_out_of_range_is_rejected(tmp_path: Path) -> None:
+    path = _write_risk_config(tmp_path, threshold="1.5")
+
+    with pytest.raises(ConfigError, match=r"decision\.risks\.water_leak.*between 0 and 1"):
+        load_config(path)
+
+
+def test_risks_require_yamnet_inference(tmp_path: Path) -> None:
+    path = _write_risk_config(tmp_path, inference="spectral_demo")
+
+    with pytest.raises(ConfigError, match="requires YAMNet inference"):
+        load_config(path)
+
+
+def test_risk_labels_must_be_non_empty(tmp_path: Path) -> None:
+    path = _write_risk_config(tmp_path, labels="")
+
+    with pytest.raises(ConfigError, match="labels must be a non-empty array"):
         load_config(path)
 
 

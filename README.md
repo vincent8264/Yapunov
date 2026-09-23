@@ -225,6 +225,25 @@ claimed: identity-aware voice recognition needs consent, enrollment, and separat
 validation. A later extension can safely detect generic speech during configured quiet
 hours without identifying a speaker.
 
+### Developing-risk warnings
+
+Optional `[decision.risks.<name>]` tables add warnings for risks that build up over
+time. They are tracked separately from the emergency events and never change an
+emergency alert. `configs/sound-uno-q.toml` defines `water_leak`, which listens for
+`Drip`, `Trickle, dribble`, `Gush`, and `Water tap, faucet`.
+
+YAMNet reports its raw score for each listed AudioSet label. A timestamped history
+keeps only the last `window_seconds` (default 15 s). Each inference is credited with the time
+since the previous one, capped at the one-second model window. A warning such as
+`[WARNING] Possible water leak detected` prints only when any listed label scores at
+or above `threshold` for at least `min_detected_seconds` (default 7 s) of that window, and then
+not again for `cooldown_seconds` (default 300 s). Startup fails if a label is not in the
+YAMNet class map or if the inference type is not YAMNet. When email is configured, each
+printed warning also sends one background email with the detected duration and
+strongest label; `cooldown_seconds` therefore also limits repeat emails. Warnings do
+not change the matrix or its email-status pixel. The 0.15 thresholds are uncalibrated;
+tune them with real recordings of the tap, a leak, and cooking in the deployment room.
+
 ## Optional email
 
 Create the ignored private configuration from the checked-in template:

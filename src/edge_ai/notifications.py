@@ -12,7 +12,7 @@ import smtplib
 import threading
 from typing import Final
 
-from edge_ai.decision import Decision
+from edge_ai.decision import Decision, RiskWarning
 from edge_ai.hardware.base import HardwareBackend
 
 
@@ -22,6 +22,7 @@ class AlertNotification:
     confidence: float
     device_name: str
     timestamp: str
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,16 @@ _EVENT_COPY: Final[dict[str, tuple[str, str, str]]] = {
         "A possible spoken call for help was detected",
         "Please contact the resident immediately.",
     ),
+    "water_leak": (
+        "Warning: possible water leak",
+        "Dripping or running-water sounds persisted",
+        "Please check taps, pipes, and appliances for a leak.",
+    ),
+    "unattended_cooking": (
+        "Warning: possible unattended cooking",
+        "Boiling, frying, or kettle-whistle sounds persisted",
+        "Please check that the stove is attended.",
+    ),
 }
 
 
@@ -72,7 +83,8 @@ def render_notification_message(alert: AlertNotification) -> NotificationMessage
             f"{action}\n\n"
             "Detection details:\n"
             f"Event: {display_event}\n"
-            f"Classifier confidence: {alert.confidence:.1%}\n"
+            + (f"Pattern: {alert.detail}\n" if alert.detail else "")
+            + f"Classifier confidence: {alert.confidence:.1%}\n"
             f"Device: {alert.device_name}\n"
             f"Time: {alert.timestamp}\n\n"
             "This is an automated sound-classification alert and does not confirm "
@@ -289,6 +301,29 @@ class NotifyingHardware(HardwareBackend):
             except Exception as exc:
                 self.last_notification_error = f"{type(exc).__name__}: {exc}"
             self.hardware.show_notification_status(delivered)
+        for warning in decision.warnings:
+            self._notify_warning(warning)
+
+    def _notify_warning(self, warning: RiskWarning) -> None:
+        # Warnings are email-only, so they never change the matrix email-status pixel.
+        detail = (
+            f"detected for {warning.detected_seconds:.0f} s of the last "
+            f"{warning.window_seconds:.0f} s"
+        )
+        if warning.peak_label:
+            detail += f" (strongest sound: {warning.peak_label})"
+        try:
+            self.notifier.notify(
+                AlertNotification(
+                    event=warning.risk,
+                    confidence=warning.peak_score,
+                    device_name=self.device_name,
+                    timestamp=self.clock(self.local_timezone).isoformat(timespec="seconds"),
+                    detail=detail,
+                )
+            )
+        except Exception as exc:
+            self.last_notification_error = f"{type(exc).__name__}: {exc}"
 
     def shutdown(self) -> None:
         try:

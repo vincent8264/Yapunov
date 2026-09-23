@@ -127,6 +127,62 @@ def test_real_yamnet_recognizes_most_simulated_sounds(event: str) -> None:
     assert labels.count(event) >= 16
 
 
+def test_yamnet_reports_watched_labels_separately_from_events(tmp_path: Path) -> None:
+    path = tmp_path / "yamnet.onnx"
+    path.write_bytes(b"fake model placeholder")
+    scores = np.zeros((2, 521), dtype=np.float32)
+    scores[0, 442] = 0.3
+    scores[1, 442] = 0.6
+    scores[1, 393] = 0.9
+    engine = YAMNetInferenceEngine(
+        path,
+        class_labels=tuple(
+            "Drip" if index == 442 else f"class_{index}" for index in range(521)
+        ),
+        watched_labels=("Drip", "class_450"),
+        session_factory=lambda *args, **kwargs: FakeSession(scores),
+    )
+
+    result = engine.predict(np.zeros(16_000, dtype=np.float32))
+
+    assert result.label == "smoke_alarm"
+    assert dict(result.label_scores) == {
+        "Drip": pytest.approx(0.6),
+        "class_450": pytest.approx(0.0),
+    }
+
+
+def test_yamnet_rejects_unknown_watched_label(tmp_path: Path) -> None:
+    path = tmp_path / "yamnet.onnx"
+    path.write_bytes(b"fake model placeholder")
+
+    with pytest.raises(ValueError, match="not in the YAMNet class map: 'Kettle'"):
+        YAMNetInferenceEngine(
+            path,
+            class_labels=tuple(f"class_{index}" for index in range(521)),
+            watched_labels=("Kettle",),
+            session_factory=lambda *args, **kwargs: FakeSession(
+                np.zeros((1, 521), dtype=np.float32)
+            ),
+        )
+
+
+def test_real_class_map_contains_configured_risk_labels() -> None:
+    from edge_ai.inference.yamnet import load_yamnet_class_labels
+
+    labels = set(load_yamnet_class_labels(_REAL_MODEL.with_name("yamnet_class_map.csv")))
+
+    assert {
+        "Drip",
+        "Trickle, dribble",
+        "Gush",
+        "Water tap, faucet",
+        "Boiling",
+        "Frying (food)",
+        "Steam whistle",
+    } <= labels
+
+
 def test_yamnet_rejects_an_invalid_scores_shape(tmp_path: Path) -> None:
     engine, _ = build_engine(tmp_path, np.zeros((1, 520), dtype=np.float32))
 

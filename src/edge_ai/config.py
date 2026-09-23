@@ -40,6 +40,7 @@ from edge_ai.settings import (
     SettingsError,
     load_notification_preferences,
 )
+from edge_ai.risk_monitor import RiskRule, RiskWarningDecision, RollingRiskMonitor
 from edge_ai.sound_decision import SoundDecisionPolicy
 
 
@@ -309,8 +310,18 @@ def _build_preprocessor(section: Mapping[str, Any]) -> Callable[[Any], Any]:
     raise ConfigError(f"unsupported [preprocessing].type: {component_type!r}")
 
 
-def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceEngine:
+def _build_inference(
+    section: Mapping[str, Any],
+    config_dir: Path,
+    *,
+    watched_labels: tuple[str, ...] = (),
+) -> InferenceEngine:
     component_type = _component_type(section, "inference")
+    if watched_labels and component_type not in {"yamnet", "scheduled_audio"}:
+        raise ConfigError(
+            f"[decision.risks] requires YAMNet inference, not [inference].type = "
+            f"{component_type!r}"
+        )
     if component_type == "dummy":
         try:
             return DummyInferenceEngine(threshold=_number(section, "threshold", 0.8))
@@ -357,6 +368,7 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
             return YAMNetInferenceEngine(
                 (config_dir / model).resolve(),
                 background_threshold=_number(section, "background_threshold", 0.1),
+                watched_labels=watched_labels,
             )
         except (FileNotFoundError, ValueError) as exc:
             raise ConfigError(str(exc)) from exc
@@ -385,7 +397,7 @@ def _build_inference(section: Mapping[str, Any], config_dir: Path) -> InferenceE
 
         try:
             return ScheduledAudioInferenceEngine(
-                _build_inference(environment, config_dir),
+                _build_inference(environment, config_dir, watched_labels=watched_labels),
                 _build_inference(keyword, config_dir),
                 environment_every_steps=_integer(
                     section, "environment_every_steps", 3
@@ -442,6 +454,43 @@ def _build_decision(section: Mapping[str, Any]) -> Callable[[InferenceResult], D
         except ValueError as exc:
             raise ConfigError(f"invalid [decision] configuration: {exc}") from exc
     raise ConfigError(f"unsupported [decision].type: {component_type!r}")
+
+
+def _build_risk_rules(section: Mapping[str, Any]) -> tuple[RiskRule, ...]:
+    raw_risks = section.get("risks")
+    if raw_risks is None:
+        return ()
+    if not isinstance(raw_risks, dict) or not raw_risks:
+        raise ConfigError("[decision.risks] must contain at least one [decision.risks.<name>]")
+    rules: list[RiskRule] = []
+    for name, risk in raw_risks.items():
+        table = f"decision.risks.{name}"
+        if not isinstance(risk, dict):
+            raise ConfigError(f"[{table}] must be a table")
+        labels = risk.get("labels")
+        if (
+            not isinstance(labels, list)
+            or not labels
+            or not all(isinstance(label, str) and label for label in labels)
+        ):
+            raise ConfigError(f"[{table}].labels must be a non-empty array of YAMNet labels")
+        if "threshold" not in risk:
+            raise ConfigError(f"[{table}].threshold is required")
+        try:
+            rules.append(
+                RiskRule(
+                    name=name,
+                    message=_required_string(risk, "message", table),
+                    labels=tuple(labels),
+                    threshold=_number(risk, "threshold", 0.0),
+                    window_seconds=_number(risk, "window_seconds", 15.0),
+                    min_detected_seconds=_number(risk, "min_detected_seconds", 7.0),
+                    cooldown_seconds=_number(risk, "cooldown_seconds", 300.0),
+                ).validated()
+            )
+        except ValueError as exc:
+            raise ConfigError(f"invalid [{table}] configuration: {exc}") from exc
+    return tuple(rules)
 
 
 def _build_hardware(section: Mapping[str, Any]) -> HardwareBackend:
@@ -717,8 +766,26 @@ def load_config(path: Path) -> ConfiguredPipeline:
     )
     try:
         preprocessor = _build_preprocessor(preprocessing_section)
-        inference = _build_inference(_table(document, "inference"), config_path.parent)
-        decision_function = _build_decision(_table(document, "decision"))
+        decision_section = _table(document, "decision")
+        risk_rules = _build_risk_rules(decision_section)
+        inference = _build_inference(
+            _table(document, "inference"),
+            config_path.parent,
+            watched_labels=tuple(
+                dict.fromkeys(label for rule in risk_rules for label in rule.labels)
+            ),
+        )
+        decision_function = _build_decision(decision_section)
+        if risk_rules:
+            decision_function = RiskWarningDecision(
+                decision_function,
+                RollingRiskMonitor(
+                    risk_rules,
+                    max_observation_seconds=_number(
+                        preprocessing_section, "duration_seconds", 1.0
+                    ),
+                ),
+            )
         hardware = _build_hardware(_table(document, "hardware"))
         notifications = document.get("notifications")
         if notifications is not None:

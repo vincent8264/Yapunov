@@ -65,4 +65,7 @@ class ScheduledAudioInferenceEngine(InferenceEngine):
             source=sources or chosen.source,
             evaluated_events=evaluated or chosen.evaluated_events,
             timings_ms=tuple(timings),
+            label_scores=tuple(
+                score for result in results for score in result.label_scores
+            ),
         )

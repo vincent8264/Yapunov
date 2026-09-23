@@ -78,6 +78,8 @@ def loop() -> None:
             f"action={decision.action} event={decision.event or '-'} "
             f"latency_ms={elapsed_ms:.1f}{detector_timings}"
         )
+        for warning in decision.warnings:
+            print(f"[WARNING] {warning.message}", flush=True)
     delay = period - (time.perf_counter() - started)
     if delay > 0.0:
         time.sleep(delay)

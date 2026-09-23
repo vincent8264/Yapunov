@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from edge_ai import notifications
-from edge_ai.decision import Decision
+from edge_ai.decision import Decision, RiskWarning
 from edge_ai.hardware.mock import MockHardware
 from edge_ai.notifications import (
     AlertNotification,
@@ -49,7 +49,96 @@ def test_notification_contains_metadata_only_for_new_event() -> None:
         "confidence",
         "device_name",
         "timestamp",
+        "detail",
     }
+    assert notifier.alerts[0].detail is None
+
+
+def _water_warning() -> RiskWarning:
+    return RiskWarning(
+        risk="water_leak",
+        message="Possible water leak detected",
+        detected_seconds=7.25,
+        window_seconds=15.0,
+        peak_score=0.42,
+        peak_label="Water tap, faucet",
+    )
+
+
+def test_risk_warning_sends_one_email_without_changing_the_matrix() -> None:
+    physical = MockHardware(verbose=False)
+    notifier = RecordingNotifier()
+    hardware = NotifyingHardware(physical, notifier, device_name="Kitchen")
+
+    hardware.apply_decision(Decision("idle", warnings=(_water_warning(),)))
+    hardware.apply_decision(Decision("idle"))
+
+    assert len(notifier.alerts) == 1
+    alert = notifier.alerts[0]
+    assert alert.event == "water_leak"
+    assert alert.confidence == pytest.approx(0.42)
+    assert alert.detail == (
+        "detected for 7 s of the last 15 s (strongest sound: Water tap, faucet)"
+    )
+    assert physical.current_alert is None
+    assert physical.notification_delivered is False
+
+
+def test_risk_warning_email_accompanies_an_emergency_email() -> None:
+    physical = MockHardware(verbose=False)
+    notifier = RecordingNotifier()
+    hardware = NotifyingHardware(physical, notifier, device_name="Kitchen")
+
+    hardware.apply_decision(
+        Decision(
+            "alert",
+            event="smoke_alarm",
+            confidence=0.9,
+            notify=True,
+            warnings=(_water_warning(),),
+        )
+    )
+
+    assert [alert.event for alert in notifier.alerts] == ["smoke_alarm", "water_leak"]
+    assert physical.current_alert == "smoke_alarm"
+    assert physical.notification_delivered is True
+
+
+def test_risk_warning_email_failure_is_recorded_not_raised() -> None:
+    hardware = NotifyingHardware(
+        MockHardware(verbose=False), FailingNotifier(), device_name="Kitchen"
+    )
+
+    hardware.apply_decision(Decision("idle", warnings=(_water_warning(),)))
+
+    assert hardware.last_notification_error == "OSError: network unavailable"
+
+
+def test_risk_warning_messages_use_cautious_copy() -> None:
+    water = render_notification_message(
+        AlertNotification(
+            event="water_leak",
+            confidence=0.42,
+            device_name="Kitchen",
+            timestamp="2026-09-22T14:30:00-07:00",
+            detail="detected for 7 s of the last 15 s (strongest sound: Drip)",
+        )
+    )
+    cooking = render_notification_message(
+        AlertNotification(
+            event="unattended_cooking",
+            confidence=0.5,
+            device_name="Kitchen",
+            timestamp="2026-09-22T14:30:00-07:00",
+        )
+    )
+
+    assert water.subject == "Warning: possible water leak at Kitchen"
+    assert "Pattern: detected for 7 s of the last 15 s (strongest sound: Drip)" in water.body
+    assert "does not confirm an emergency" in water.body
+    assert cooking.subject == "Warning: possible unattended cooking at Kitchen"
+    assert "stove is attended" in cooking.body
+    assert "Pattern:" not in cooking.body
 
 
 def test_notification_failure_does_not_cancel_local_alert() -> None:

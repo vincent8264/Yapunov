@@ -57,6 +57,8 @@ def run_pipeline(
                 f"notify={str(decision.notify).lower()} latency_ms={elapsed_ms:.1f}"
                 f"{detector_timings}"
             )
+            for warning in decision.warnings:
+                emit(f"[WARNING] {warning.message}")
             delay = max(
                 configured.interval_seconds, configured.pipeline.poll_interval_seconds
             ) - (time.perf_counter() - started)

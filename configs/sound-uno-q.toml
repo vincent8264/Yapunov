@@ -30,6 +30,18 @@ confirmations = { smoke_alarm = 1, glass_break = 1, fall_thud = 1 }
 hold_seconds = 5.0
 notification_cooldown_seconds = 30.0
 
+# Developing risks are tracked separately from the emergencies above. A warning
+# prints only when any listed YAMNet label scores at or above `threshold` for at
+# least `min_detected_seconds` of the last `window_seconds`. Labels must match the
+# YAMNet class map exactly. Thresholds are uncalibrated starting values.
+[decision.risks.water_leak]
+message = "Possible water leak detected"
+labels = ["Drip", "Trickle, dribble", "Gush", "Water tap, faucet"]
+threshold = 0.15
+window_seconds = 20.0
+min_detected_seconds = 8.0
+cooldown_seconds = 15.0
+
 [hardware]
 type = "uno_q"
 

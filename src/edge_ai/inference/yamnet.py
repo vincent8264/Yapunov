@@ -64,6 +64,7 @@ class YAMNetInferenceEngine(InferenceEngine):
         event_class_indices: Mapping[str, Sequence[int]] = DEFAULT_EVENT_CLASS_INDICES,
         class_map_path: Path | None = None,
         class_labels: Sequence[str] | None = None,
+        watched_labels: Sequence[str] = (),
         session_factory: SessionFactory | None = None,
     ) -> None:
         path = Path(model_path)
@@ -116,6 +117,15 @@ class YAMNetInferenceEngine(InferenceEngine):
         if len(class_labels) != self.CLASS_COUNT or any(not label for label in class_labels):
             raise ValueError("YAMNet class labels must contain exactly 521 non-empty labels")
         self.class_labels = tuple(class_labels)
+        index_by_label = {label: index for index, label in enumerate(self.class_labels)}
+        unknown = [label for label in watched_labels if label not in index_by_label]
+        if unknown:
+            raise ValueError(
+                f"labels not in the YAMNet class map: {', '.join(map(repr, unknown))}"
+            )
+        self.watched_label_indices = {
+            label: index_by_label[label] for label in dict.fromkeys(watched_labels)
+        }
 
     def predict(self, data: Any) -> InferenceResult:
         scores = self._predict_scores(data)
@@ -136,6 +146,10 @@ class YAMNetInferenceEngine(InferenceEngine):
             "model_confidence": raw_confidence,
             "source": "yamnet",
             "evaluated_events": tuple(self.event_class_indices),
+            "label_scores": tuple(
+                (label, float(np.clip(np.max(scores[:, index]), 0.0, 1.0)))
+                for label, index in self.watched_label_indices.items()
+            ),
         }
         if confidence < self.background_threshold:
             return InferenceResult("background", 1.0 - confidence, **common)
