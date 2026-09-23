@@ -1,7 +1,7 @@
 """Explicit TOML configuration factories for the starter pipeline."""
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import tzinfo
 from functools import partial
 import os
@@ -16,6 +16,7 @@ from edge_ai.hardware.base import HardwareBackend
 from edge_ai.hardware.mock import MockHardware
 from edge_ai.hardware.matrix_preview import MatrixPreviewHardware
 from edge_ai.hardware.uno_q import UnoQHardware
+from edge_ai.heartbeat import DEVICE_ID_PATTERN, HeartbeatSender
 from edge_ai.inference.base import InferenceEngine, InferenceResult
 from edge_ai.inference.dummy import DummyInferenceEngine
 from edge_ai.inference.spectral import SpectralSoundInferenceEngine
@@ -53,11 +54,24 @@ class ConfigError(ValueError):
 class ConfiguredPipeline:
     pipeline: Pipeline
     interval_seconds: float
+    heartbeat: HeartbeatSender | None = None
 
 
 @dataclass(frozen=True)
 class ConfiguredNotifier:
     notifier: Notifier | None
+    device_name: str
+    local_timezone: tzinfo
+
+
+@dataclass(frozen=True)
+class HeartbeatServerConfig:
+    host: str
+    port: int
+    device_id: str
+    token: str = field(repr=False)
+    missing_after_seconds: float
+    notifier: Notifier
     device_name: str
     local_timezone: tzinfo
 
@@ -691,6 +705,65 @@ def _build_notifier(
     return ConfiguredNotifier(notifier, preferences.device_name, local_timezone)
 
 
+def _heartbeat_device_id(section: Mapping[str, Any]) -> str:
+    device_id = _required_string(section, "device_id", "heartbeat")
+    if not DEVICE_ID_PATTERN.fullmatch(device_id):
+        raise ConfigError(
+            "[heartbeat].device_id must be 1-64 letters, digits, '.', '_', or '-'"
+        )
+    return device_id
+
+
+def _heartbeat_token(section: Mapping[str, Any], config_dir: Path) -> str:
+    token_env = section.get("token_env")
+    token_file = section.get("token_file")
+    if token_env is not None and (not isinstance(token_env, str) or not token_env):
+        raise ConfigError("[heartbeat].token_env must be a non-empty string")
+    if token_file is not None and (not isinstance(token_file, str) or not token_file):
+        raise ConfigError("[heartbeat].token_file must be a non-empty path")
+    if (token_env is None) == (token_file is None):
+        raise ConfigError("set exactly one of [heartbeat].token_env or token_file")
+    if token_env is not None:
+        token = os.environ.get(token_env, "").strip()
+        if not token:
+            raise ConfigError(f"heartbeat token environment variable is not set: {token_env}")
+        return token
+    token_path = (config_dir / token_file).resolve()
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError as exc:
+        raise ConfigError(f"heartbeat token file not found: {token_path}") from exc
+    except OSError as exc:
+        raise ConfigError(f"could not read heartbeat token file: {exc}") from exc
+    if not token:
+        raise ConfigError(f"heartbeat token file is empty: {token_path}")
+    return token
+
+
+def _build_heartbeat(section: Mapping[str, Any], config_dir: Path) -> HeartbeatSender | None:
+    if not _boolean(section, "enabled", True):
+        return None
+    url = _required_string(section, "url", "heartbeat")
+    device_id = _heartbeat_device_id(section)
+    token = _heartbeat_token(section, config_dir)
+    interval_seconds = _number(section, "interval_seconds", 60.0)
+    timeout_seconds = _number(section, "timeout_seconds", 5.0)
+    stall_seconds = _number(section, "stall_seconds", 30.0)
+    status_log = _boolean(section, "status_log", True)
+    try:
+        return HeartbeatSender(
+            url=url,
+            device_id=device_id,
+            token=token,
+            interval_seconds=interval_seconds,
+            timeout_seconds=timeout_seconds,
+            stall_seconds=stall_seconds,
+            reporter=print if status_log else None,
+        )
+    except ValueError as exc:
+        raise ConfigError(f"invalid [heartbeat] configuration: {exc}") from exc
+
+
 def _load_document(path: Path) -> tuple[Path, Mapping[str, Any]]:
     config_path = Path(path).resolve()
     try:
@@ -762,6 +835,43 @@ def load_notification_config(path: Path, *, asynchronous: bool = False) -> Confi
         _table(document, "notifications"),
         config_path.parent,
         asynchronous=asynchronous,
+    )
+
+
+def load_heartbeat_server_config(path: Path) -> HeartbeatServerConfig:
+    """Load the watchdog server, sharing [heartbeat] identity and SMTP settings."""
+    config_path, document = _load_document(path)
+    heartbeat = _table(document, "heartbeat")
+    server = _table(document, "heartbeat_server")
+    device_id = _heartbeat_device_id(heartbeat)
+    token = _heartbeat_token(heartbeat, config_path.parent)
+    interval_seconds = _number(heartbeat, "interval_seconds", 60.0)
+    missing_after_seconds = _number(server, "missing_after_seconds", 150.0)
+    if missing_after_seconds <= interval_seconds:
+        raise ConfigError(
+            "[heartbeat_server].missing_after_seconds must be longer than "
+            "[heartbeat].interval_seconds"
+        )
+    host = server.get("host", "127.0.0.1")
+    if not isinstance(host, str) or not host:
+        raise ConfigError("[heartbeat_server].host must be a non-empty string")
+    port = _integer(server, "port", 8090)
+    if not 1 <= port <= 65_535:
+        raise ConfigError("[heartbeat_server].port must be between 1 and 65535")
+    configured = _build_notifier(_table(document, "notifications"), config_path.parent)
+    if configured.notifier is None:
+        raise ConfigError(
+            "the heartbeat server requires enabled [notifications] with type = 'smtp'"
+        )
+    return HeartbeatServerConfig(
+        host=host,
+        port=port,
+        device_id=device_id,
+        token=token,
+        missing_after_seconds=missing_after_seconds,
+        notifier=configured.notifier,
+        device_name=configured.device_name,
+        local_timezone=configured.local_timezone,
     )
 
 
@@ -847,6 +957,12 @@ def load_config(path: Path) -> ConfiguredPipeline:
                     device_name=configured_notifier.device_name,
                     local_timezone=configured_notifier.local_timezone,
                 )
+        heartbeat_section = document.get("heartbeat")
+        heartbeat = None
+        if heartbeat_section is not None:
+            if not isinstance(heartbeat_section, dict):
+                raise ConfigError("invalid [heartbeat] section")
+            heartbeat = _build_heartbeat(heartbeat_section, config_path.parent)
         pipeline = Pipeline(
             input_source=input_source,
             preprocessor=preprocessor,
@@ -860,4 +976,6 @@ def load_config(path: Path) -> ConfiguredPipeline:
         if callable(close):
             close()
         raise
-    return ConfiguredPipeline(pipeline=pipeline, interval_seconds=interval_seconds)
+    return ConfiguredPipeline(
+        pipeline=pipeline, interval_seconds=interval_seconds, heartbeat=heartbeat
+    )

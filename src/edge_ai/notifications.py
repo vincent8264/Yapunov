@@ -86,6 +86,30 @@ _EVENT_COPY: Final[dict[str, tuple[str, str, str]]] = {
 
 def render_notification_message(alert: Notification) -> NotificationMessage:
     """Render fixed, cautious copy without sending event data to a text model."""
+    if isinstance(alert, HealthNotification) and alert.component == "device":
+        if alert.status == "offline":
+            return NotificationMessage(
+                subject=f"Device warning: no heartbeat from {alert.device_name}",
+                body=(
+                    f"The monitoring server stopped receiving heartbeats from "
+                    f"{alert.device_name}. This was detected at {alert.timestamp}.\n\n"
+                    f"Detail: {alert.detail}\n"
+                    f"Device: {alert.device_name}\n\n"
+                    "The device may be powered off, disconnected from the network, or "
+                    "stalled, so local sound alerts may not be working. Please check "
+                    "the device. A network outage between the device and the server "
+                    "can also cause this warning.\n"
+                ),
+            )
+        return NotificationMessage(
+            subject=f"Device recovered: heartbeat resumed from {alert.device_name}",
+            body=(
+                f"The monitoring server received a heartbeat from {alert.device_name} "
+                f"again at {alert.timestamp}.\n\n"
+                f"Detail: {alert.detail}\n"
+                f"Device: {alert.device_name}\n"
+            ),
+        )
     if isinstance(alert, HealthNotification):
         if alert.status == "fault":
             return NotificationMessage(

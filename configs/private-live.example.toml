@@ -50,3 +50,25 @@ password_env = "EDGE_AI_SMTP_PASSWORD"
 starttls = true
 timeout_seconds = 5.0
 status_log = true
+
+# Optional liveness heartbeat. The device POSTs to `url` every `interval_seconds`
+# while its main loop is running; `edge-ai heartbeat-server` with this same file
+# emails the recipients above when heartbeats stop. Remove both tables to disable.
+# Generate a token once, for example with:
+#   export EDGE_AI_HEARTBEAT_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+[heartbeat]
+# The server computer's LAN address, reachable from the UNO Q (not localhost).
+url = "http://192.0.2.10:8090/heartbeat"
+device_id = "home-sound-monitor"
+token_env = "EDGE_AI_HEARTBEAT_TOKEN"
+interval_seconds = 60.0
+timeout_seconds = 5.0
+# Stop heartbeats if the main loop has not advanced for this long.
+stall_seconds = 30.0
+
+[heartbeat_server]
+# 0.0.0.0 accepts heartbeats from the LAN; use 127.0.0.1 for a laptop-only test.
+host = "0.0.0.0"
+port = 8090
+# Email after this long without a heartbeat. 150 s tolerates one lost request.
+missing_after_seconds = 150.0

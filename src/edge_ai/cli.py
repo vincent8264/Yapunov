@@ -67,6 +67,12 @@ def _parser() -> argparse.ArgumentParser:
         help="listen address; use 0.0.0.0 for access over the device LAN",
     )
     setup.add_argument("--port", type=int, default=8080, help="listen port (default: 8080)")
+    heartbeat_server = subparsers.add_parser(
+        "heartbeat-server", help="email when the device stops sending heartbeats"
+    )
+    heartbeat_server.add_argument(
+        "--config", type=Path, required=True, help="private TOML with [heartbeat_server]"
+    )
     inspect_audio = subparsers.add_parser(
         "inspect-audio", help="show raw YAMNet AudioSet predictions for one WAV file"
     )
@@ -179,6 +185,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             _send_test_notification(args.config, args.event, args.confidence)
         elif args.command == "setup":
             run_setup_server(args.config, host=args.host, port=args.port)
+        elif args.command == "heartbeat-server":
+            from edge_ai.heartbeat_server import run_heartbeat_server
+
+            run_heartbeat_server(args.config)
         elif args.command == "inspect-audio":
             _inspect_audio(args.audio, args.model, args.class_map, args.top_k)
         else:
