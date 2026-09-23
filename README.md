@@ -346,19 +346,31 @@ in the terminal. The page collects up to five comma-separated recipient emails, 
 device/room name, timezone, and whether remote notifications are enabled. **Save and
 send test** verifies SMTP delivery to every recipient before saving the preferences.
 
-When the command runs on the UNO Q, use `--host 0.0.0.0` and open the board's LAN IP
-from the setup computer:
+For a manual UNO Q session, use `--host 0.0.0.0` and open the board's LAN IP from the
+setup computer:
 
 ```bash
 uv run edge-ai setup --config configs/private-live.toml --host 0.0.0.0
 ```
 
+`0.0.0.0` is the server's listen address, not an address to enter in a browser. Open
+`http://<board-ip>:8080`; for example, a board assigned `192.168.1.50` is reached at
+`http://192.168.1.50:8080`. A router DHCP reservation is optional, but keeps that URL
+from changing. A verified local DNS or mDNS hostname can be used instead. Do not
+port-forward the setup portal or expose it to the public internet.
+
 The LAN PIN prevents another person on the same network from changing recipients or
-triggering a test email during setup. The portal stores only non-secret preferences in
-the configured JSON file with
-owner-only permissions. The SMTP password stays in the environment, and the portal
-stops when you press Ctrl+C. The regular `edge-ai run` command automatically uses the
-saved preferences. Persistence across an App Lab redeploy and unattended startup must
+triggering a test email. The portal stores only non-secret preferences in the
+configured JSON file with owner-only permissions. The SMTP password stays in the
+environment, and a manual portal stops when you press Ctrl+C. The regular `edge-ai
+run` command uses the saved preferences on its next start.
+
+The email-enabled App Lab package starts the same portal in a background thread at
+`0.0.0.0:8080` while sound detection continues. Its six-digit PIN is created in an
+owner-only `setup-pin` file and printed in the App Lab log. Saving the form safely
+replaces the running notifier, so new recipients, device name, timezone, and enabled
+state take effect without restarting detection. The settings and PIN persist across
+normal app restarts in the app directory; persistence across an App Lab redeploy must
 still be verified on the physical UNO Q before field use.
 
 ## Adding the UNO Q
@@ -430,7 +442,8 @@ only needed to choose a different private config. The packager copies the
 the board. That zip contains the secret: import it only on your own UNO Q and never
 upload it to the project page. The board must be on Wi-Fi with outbound SMTP allowed.
 Email runs in the background, so a failed send is logged and never blocks the matrix
-alert.
+alert. The App Lab log also prints the local setup URL and persistent setup PIN; open
+the URL from a device on the same LAN to change recipients and send a test message.
 
 The sketch uses the documented onboard matrix library and no external pins. Confirm
 the installed App Lab, Bridge, and `Arduino_LED_Matrix` versions on the board, and

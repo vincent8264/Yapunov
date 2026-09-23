@@ -32,6 +32,8 @@ YAMNET_MODEL_SOURCE = REPO_ROOT / "models" / "yamnet.onnx"
 YAMNET_CLASS_MAP_SOURCE = REPO_ROOT / "models" / "yamnet_class_map.csv"
 BOARD_CONFIG_NAME = "sound-uno-q.toml"
 PASSWORD_FILE_NAME = "smtp-password"
+NOTIFICATION_SETTINGS_FILE_NAME = "notification-settings.json"
+SETUP_PIN_FILE_NAME = "setup-pin"
 YAMNET_TEST_MODE = "yamnet-test"
 ONNXRUNTIME_REQUIREMENT = "onnxruntime==1.30.0"
 
@@ -123,18 +125,31 @@ def _board_notifications(config_path: Path, password: str | None) -> tuple[str, 
                 enabled=preferences.enabled,
             )
 
-    lines = ["[notifications]", 'type = "smtp"']
+    lines = [
+        "[notifications]",
+        'type = "smtp"',
+        f'settings_file = "{NOTIFICATION_SETTINGS_FILE_NAME}"',
+    ]
     lines += [f"{key} = {_toml_value(value)}" for key, value in settings.items()]
-    if "username" not in settings:
-        return "\n".join(lines) + "\n", None
-    if not password:
-        raise ValueError(
-            "the SMTP password is required: set [notifications].password in the "
-            f"ignored {config_path}, or set the environment variable named by "
-            "[notifications].password_env"
-        )
-    lines.append(f'password_file = "{PASSWORD_FILE_NAME}"')
-    return "\n".join(lines) + "\n", password
+    bundled_password: str | None = None
+    if "username" in settings:
+        if not password:
+            raise ValueError(
+                "the SMTP password is required: set [notifications].password in the "
+                f"ignored {config_path}, or set the environment variable named by "
+                "[notifications].password_env"
+            )
+        lines.append(f'password_file = "{PASSWORD_FILE_NAME}"')
+        bundled_password = password
+    lines += [
+        "",
+        "[setup]",
+        "enabled = true",
+        'host = "0.0.0.0"',
+        "port = 8080",
+        f'pin_file = "{SETUP_PIN_FILE_NAME}"',
+    ]
+    return "\n".join(lines) + "\n", bundled_password
 
 
 def _board_config(source: str, config_path: Path, notifications: str | None) -> str:

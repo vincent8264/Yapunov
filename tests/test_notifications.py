@@ -20,9 +20,13 @@ from edge_ai.notifications import (
 class RecordingNotifier(Notifier):
     def __init__(self) -> None:
         self.alerts: list[AlertNotification] = []
+        self.closed = False
 
     def notify(self, alert: AlertNotification) -> None:
         self.alerts.append(alert)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FailingNotifier(Notifier):
@@ -152,6 +156,62 @@ def test_notification_failure_does_not_cancel_local_alert() -> None:
 
     assert physical.current_alert == "glass_break"
     assert hardware.last_notification_error == "OSError: network unavailable"
+
+
+def test_notification_settings_can_change_without_restarting_detector() -> None:
+    physical = MockHardware(verbose=False)
+    original = RecordingNotifier()
+    replacement = RecordingNotifier()
+    hardware = NotifyingHardware(
+        physical,
+        original,
+        device_name="Kitchen",
+        clock=lambda timezone: datetime(2026, 9, 23, tzinfo=timezone),
+    )
+
+    hardware.reconfigure_notifications(
+        replacement,
+        device_name="Upstairs hallway",
+        local_timezone=ZoneInfo("America/Los_Angeles"),
+    )
+    hardware.apply_decision(
+        Decision("alert", event="glass_break", confidence=0.9, notify=True)
+    )
+
+    assert original.closed
+    assert original.alerts == []
+    assert replacement.alerts[0].device_name == "Upstairs hallway"
+    assert replacement.alerts[0].timestamp.endswith("-07:00")
+
+
+def test_disabling_notifications_keeps_local_alert_active() -> None:
+    physical = MockHardware(verbose=False)
+    original = RecordingNotifier()
+    hardware = NotifyingHardware(physical, original, device_name="Kitchen")
+
+    hardware.reconfigure_notifications(
+        None,
+        device_name="Kitchen",
+        local_timezone=ZoneInfo("UTC"),
+    )
+    hardware.apply_decision(
+        Decision("alert", event="smoke_alarm", confidence=0.9, notify=True)
+    )
+
+    assert original.closed
+    assert physical.current_alert == "smoke_alarm"
+    assert physical.notification_delivered is False
+
+
+def test_notification_wrapper_forwards_startup_status() -> None:
+    physical = MockHardware(verbose=False)
+    statuses: list[str] = []
+    physical.show_startup_status = statuses.append  # type: ignore[method-assign]
+    hardware = NotifyingHardware(physical, RecordingNotifier(), device_name="Kitchen")
+
+    hardware.show_startup_status("ready_offline")
+
+    assert statuses == ["ready_offline"]
 
 
 def test_synchronous_delivery_lights_status_and_failure_leaves_it_off() -> None:

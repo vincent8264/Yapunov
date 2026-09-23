@@ -70,6 +70,14 @@ class NotificationSetupConfig:
 
 
 @dataclass(frozen=True)
+class SetupServerConfig:
+    enabled: bool
+    host: str
+    port: int
+    pin_path: Path | None
+
+
+@dataclass(frozen=True)
 class ActuatorCheck:
     kind: str
     channel: int
@@ -779,6 +787,30 @@ def load_notification_setup_config(path: Path) -> NotificationSetupConfig:
     return NotificationSetupConfig(config_path, settings_path, preferences)
 
 
+def load_setup_server_config(path: Path) -> SetupServerConfig:
+    """Load the optional background setup portal configuration."""
+    config_path, document = _load_document(path)
+    section = document.get("setup")
+    if section is None:
+        return SetupServerConfig(False, "127.0.0.1", 8080, None)
+    if not isinstance(section, dict):
+        raise ConfigError("invalid [setup] section")
+    enabled = _boolean(section, "enabled", False)
+    host = section.get("host", "127.0.0.1")
+    if not isinstance(host, str) or not host.strip():
+        raise ConfigError("[setup].host must be a non-empty string")
+    port = _integer(section, "port", 8080)
+    if not 1 <= port <= 65_535:
+        raise ConfigError("[setup].port must be between 1 and 65535")
+    pin_file = section.get("pin_file")
+    if pin_file is not None and (not isinstance(pin_file, str) or not pin_file.strip()):
+        raise ConfigError("[setup].pin_file must be a non-empty path")
+    pin_path = (config_path.parent / pin_file).resolve() if pin_file is not None else None
+    if enabled and host not in {"127.0.0.1", "localhost", "::1"} and pin_path is None:
+        raise ConfigError("[setup].pin_file is required when the portal is exposed over the LAN")
+    return SetupServerConfig(enabled, host, port, pin_path)
+
+
 def build_notification_test_notifier(
     path: Path, preferences: NotificationPreferences
 ) -> ConfiguredNotifier:
@@ -840,7 +872,7 @@ def load_config(path: Path) -> ConfiguredPipeline:
             if not isinstance(notifications, dict):
                 raise ConfigError("invalid [notifications] section")
             configured_notifier = _build_notifier(notifications, config_path.parent)
-            if configured_notifier.notifier is not None:
+            if _component_type(notifications, "notifications") == "smtp":
                 hardware = NotifyingHardware(
                     hardware,
                     configured_notifier.notifier,
