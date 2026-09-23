@@ -310,13 +310,14 @@ def test_microphone_health_reopens_source_and_reports_recovery() -> None:
     with pytest.raises(MicrophoneHealthError):
         source.read()
     assert factory_calls == 0
-    assert failed.closed is True
+    assert failed.closed is False
 
     now[0] = 12.0
     assert source.read() is recovered_frame
     assert source.take_recovered_reason() == "unavailable"
     assert source.take_recovered_reason() is None
     assert factory_calls == 1
+    assert failed.closed is True
 
 
 def test_microphone_health_does_not_recover_while_reopened_input_is_silent() -> None:

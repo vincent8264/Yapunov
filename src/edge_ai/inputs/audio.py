@@ -104,26 +104,31 @@ class MicrophoneHealthInput(InputSource):
         self._frozen_seconds = 0.0
         self._previous = None
         if self.source_factory is not None:
-            self._close_source(suppress_errors=True)
             self._next_retry_at = self._clock() + self.retry_interval_seconds
         return fault
 
     def _ensure_source(self) -> InputSource:
+        if self._fault is not None and self.source_factory is not None:
+            if self._clock() < self._next_retry_at:
+                raise self._fault
+            # Report the fault before touching a disconnected peripheral. Some
+            # board runtimes can block in stop() after USB removal, so cleanup is
+            # intentionally deferred until the first reconnect attempt.
+            self._close_source(suppress_errors=True)
+            try:
+                self.source = self.source_factory()
+            except Exception as exc:
+                self._next_retry_at = self._clock() + self.retry_interval_seconds
+                raise MicrophoneHealthError(
+                    "unavailable",
+                    f"microphone reconnect failed: {type(exc).__name__}: {exc}",
+                ) from exc
+            return self.source
         if self.source is not None:
             return self.source
         if self.source_factory is None or self._fault is None:
             raise RuntimeError("microphone input is closed")
-        if self._clock() < self._next_retry_at:
-            raise self._fault
-        try:
-            self.source = self.source_factory()
-        except (OSError, RuntimeError, ValueError) as exc:
-            self._next_retry_at = self._clock() + self.retry_interval_seconds
-            raise MicrophoneHealthError(
-                "unavailable",
-                f"microphone reconnect failed: {type(exc).__name__}: {exc}",
-            ) from exc
-        return self.source
+        raise self._fault
 
     def take_recovered_reason(self) -> str | None:
         """Return one recovery transition after a healthy frame resumes."""
@@ -135,7 +140,7 @@ class MicrophoneHealthInput(InputSource):
             frame = self._ensure_source().read()
         except MicrophoneHealthError:
             raise
-        except (OSError, RuntimeError, ValueError) as exc:
+        except Exception as exc:
             raise self._mark_fault(
                 "unavailable", f"microphone read failed: {type(exc).__name__}: {exc}"
             ) from exc

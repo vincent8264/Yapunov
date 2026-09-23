@@ -61,9 +61,11 @@ class UnoQHardware(HardwareBackend):
             raise RuntimeError(f"UNO Q email status returned {response!r}")
 
     def show_input_fault(self, reason: str, detail: str) -> None:
+        print(f"microphone fault: reason={reason} detail={detail}")
         self.show_alert("microphone_fault")
 
     def clear_input_fault(self, reason: str) -> None:
+        print(f"microphone recovered: previous_reason={reason}")
         if self._alert_active:
             self.clear_alert()
 
