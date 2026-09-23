@@ -60,6 +60,13 @@ class UnoQHardware(HardwareBackend):
         if response != "ok":
             raise RuntimeError(f"UNO Q email status returned {response!r}")
 
+    def show_startup_status(self, status: str) -> None:
+        if status not in {"checking", "ready", "ready_offline", "failed"}:
+            raise ValueError(f"unsupported startup status: {status!r}")
+        response = self._bridge.call("show_startup_status", status)
+        if response != "ok":
+            raise RuntimeError(f"UNO Q startup status returned {response!r}")
+
     def show_spectrum(self, columns: tuple[int, ...]) -> None:
         if len(columns) != 13 or any(
             isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 8

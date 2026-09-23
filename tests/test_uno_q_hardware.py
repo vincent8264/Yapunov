@@ -32,6 +32,15 @@ def test_health_check_rejects_unexpected_response() -> None:
         hardware.check_connection()
 
 
+def test_startup_status_calls_bridge_endpoint() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    hardware.show_startup_status("ready_offline")
+
+    assert bridge.calls == [("show_startup_status", "ready_offline")]
+
+
 def test_unverified_actuators_are_guarded_without_bridge_calls() -> None:
     bridge = FakeBridge()
     hardware = UnoQHardware(bridge=bridge)

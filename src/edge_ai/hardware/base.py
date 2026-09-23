@@ -33,6 +33,9 @@ class HardwareBackend(ABC):
     def show_notification_status(self, delivered: bool) -> None:
         """Show whether the current alert's notification was delivered, when supported."""
 
+    def show_startup_status(self, status: str) -> None:
+        """Render a board-specific startup state when supported."""
+
     @abstractmethod
     def apply_decision(self, decision: Decision) -> None: ...
 

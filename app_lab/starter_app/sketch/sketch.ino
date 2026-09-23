@@ -44,6 +44,13 @@ bool icon_bright = true;
 bool email_delivered = false;
 unsigned long last_toggle_ms = 0;
 
+constexpr uint8_t STARTUP_CHECK[8] = {
+  0x01, 0x03, 0x06, 0x8C, 0xD8, 0x70, 0x20, 0x00
+};
+constexpr uint8_t STARTUP_CROSS[8] = {
+  0x81, 0x42, 0x24, 0x18, 0x18, 0x24, 0x42, 0x81
+};
+
 void draw_alert() {
   uint8_t frame[WIDTH * HEIGHT] = {0};
   uint8_t icon_level = icon_bright ? LEVEL_BRIGHT : LEVEL_DIM;
@@ -61,6 +68,38 @@ void draw_alert() {
 }
 
 String health_check() {
+  return String("ok");
+}
+
+String show_startup_status(String status) {
+  const uint8_t* icon = nullptr;
+  uint8_t status_level = LEVEL_OFF;
+  if (status == "checking") {
+    // A small center dot means the board has responded and is checking audio.
+    uint8_t frame[WIDTH * HEIGHT] = {0};
+    frame[(HEIGHT / 2) * WIDTH + (WIDTH / 2)] = LEVEL_BRIGHT;
+    matrix.draw(frame);
+    return String("ok");
+  }
+  if (status == "ready" || status == "ready_offline") {
+    icon = STARTUP_CHECK;
+    // The final bar reports the advisory internet check: lit means reachable.
+    status_level = status == "ready" ? LEVEL_BRIGHT : LEVEL_OFF;
+  } else if (status == "failed") {
+    icon = STARTUP_CROSS;
+  } else {
+    return String("unsupported startup status");
+  }
+  uint8_t frame[WIDTH * HEIGHT] = {0};
+  for (int y = 0; y < HEIGHT; ++y) {
+    for (int x = 0; x < 8; ++x) {
+      if ((icon[y] >> (7 - x)) & 0x01) {
+        frame[y * WIDTH + x + ICON_OFFSET] = LEVEL_BRIGHT;
+      }
+    }
+    frame[y * WIDTH + STATUS_COLUMN] = status_level;
+  }
+  matrix.draw(frame);
   return String("ok");
 }
 
@@ -145,6 +184,7 @@ void setup() {
   Bridge.begin();
   // provide_safe runs Arduino hardware APIs in the main loop context.
   Bridge.provide_safe("health_check", health_check);
+  Bridge.provide_safe("show_startup_status", show_startup_status);
   Bridge.provide_safe("set_led", set_led);
   Bridge.provide_safe("show_alert", show_alert);
   Bridge.provide_safe("set_email_status", set_email_status);

@@ -359,6 +359,13 @@ the board on Wi-Fi. The first start also needs internet to install `onnxruntime`
 log prints YAMNet's top AudioSet label on each line (`model_label=Alarm`), which helps
 tune the thresholds in the live config.
 
+Before monitoring begins, the live app confirms the UNO Q Bridge response and captures
+one real microphone frame. It also makes a small HTTPS reachability check. A checkmark
+is shown on the matrix for two seconds when the required checks pass; the rightmost bar
+is lit when internet is reachable and unlit when it is not. Internet is advisory after
+installation, so an offline board still begins local sound monitoring. A microphone or
+Bridge failure stops startup and shows an X when the matrix remains reachable.
+
 To send email from the board as well, first confirm delivery from the laptop with
 `edge-ai test-notification`, then build the email variant:
 
