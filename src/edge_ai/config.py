@@ -232,6 +232,11 @@ def _build_audio_spectrum(
             inference_duration_seconds=_number(
                 preprocessing_section, "duration_seconds", 1.0
             ),
+            inference_hop_seconds=(
+                _number(section, "inference_hop_seconds", 1.0)
+                if "inference_hop_seconds" in section
+                else None
+            ),
             floor_db=_number(section, "floor_db", -60.0),
             ceiling_db=_number(section, "ceiling_db", -6.0),
         )

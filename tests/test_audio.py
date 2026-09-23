@@ -236,6 +236,48 @@ def test_audio_spectrum_separates_bands_and_reassembles_model_window() -> None:
     assert window.samples[-800:].tolist() == tone.samples.tolist()
 
 
+def test_audio_spectrum_emits_rolling_windows_at_the_configured_hop() -> None:
+    spectrum = AudioSpectrum(
+        rate_hz=5, inference_duration_seconds=0.8, inference_hop_seconds=0.2
+    )
+
+    def frame(start: int) -> AudioFrame:
+        return AudioFrame(np.arange(start, start + 2, dtype=np.float32), 10)
+
+    assert spectrum.append_for_inference(frame(0)) is None
+    assert spectrum.append_for_inference(frame(2)) is None
+    assert spectrum.append_for_inference(frame(4)) is None
+    first = spectrum.append_for_inference(frame(6))
+    second = spectrum.append_for_inference(frame(8))
+    third = spectrum.append_for_inference(frame(10))
+
+    assert first is not None
+    assert first.samples.tolist() == [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+    assert second is not None
+    assert second.samples.tolist() == [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+    assert third is not None
+    assert third.samples.tolist() == [4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0]
+
+
+def test_audio_spectrum_defaults_to_non_overlapping_windows() -> None:
+    spectrum = AudioSpectrum(rate_hz=5, inference_duration_seconds=0.8)
+
+    def frame(start: int) -> AudioFrame:
+        return AudioFrame(np.arange(start, start + 2, dtype=np.float32), 10)
+
+    for start in (0, 2, 4):
+        assert spectrum.append_for_inference(frame(start)) is None
+    first = spectrum.append_for_inference(frame(6))
+    for start in (8, 10, 12):
+        assert spectrum.append_for_inference(frame(start)) is None
+    second = spectrum.append_for_inference(frame(14))
+
+    assert first is not None
+    assert first.samples.tolist() == [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+    assert second is not None
+    assert second.samples.tolist() == [8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0]
+
+
 def test_microphone_reads_and_closes_injected_stream() -> None:
     class Stream:
         stopped = False

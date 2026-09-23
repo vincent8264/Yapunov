@@ -121,10 +121,13 @@ uv run python scripts/record_microphone.py --device "MOVO USB-M1" --output runs/
 
 The live configuration uses `[display]` to sample 50 ms audio chunks at 20 Hz and
 render their 13-band FFT spectrum on the 13×8 matrix. It accumulates those same
-chunks into the unchanged one-second YAMNet inference window. Adjust `floor_db` and
-`ceiling_db` only after measuring the deployment room; the display contains no raw
-audio and does not affect classification. Confirmed danger icons stay visible for
-five seconds in the live configurations before the spectrum resumes.
+chunks into a one-second YAMNet window, then retains the most recent window and runs
+again every 200 ms (five inferences per second). Set `inference_hop_seconds` equal
+to the window duration, or omit it, to retain the original non-overlapping behavior.
+Adjust `floor_db` and `ceiling_db` only after measuring the deployment room; the
+display contains no raw audio and does not affect classification. Confirmed danger
+icons stay visible for five seconds in the live configurations before the spectrum
+resumes.
 
 Stop it with Ctrl+C, or run a fixed number of iterations:
 
