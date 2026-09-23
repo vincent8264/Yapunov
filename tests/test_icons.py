@@ -14,11 +14,17 @@ from edge_ai.hardware.icons import (
 )
 
 
-def test_every_sound_event_has_a_distinct_8x8_icon() -> None:
-    events = ("smoke_alarm", "glass_break", "fall_thud", "help_call")
+def test_every_event_and_fault_has_a_distinct_8x8_icon() -> None:
+    events = (
+        "smoke_alarm",
+        "glass_break",
+        "fall_thud",
+        "help_call",
+        "microphone_fault",
+    )
     rows = [icon_rows(event) for event in events]
 
-    assert len(set(rows)) == 4
+    assert len(set(rows)) == len(events)
     assert all(len(item) == 8 for item in rows)
     assert all(0 <= row <= 255 for item in rows for row in item)
     assert all(len(line) == 8 for event in events for line in ICONS[event])
@@ -34,6 +40,7 @@ def test_sketch_icon_bitmaps_match_python_artwork() -> None:
         ("glass_break", "ICON_GLASS"),
         ("fall_thud", "ICON_FALL"),
         ("help_call", "ICON_HELP"),
+        ("microphone_fault", "ICON_MICROPHONE_FAULT"),
     ):
         match = re.search(rf"{name}\[8\] = \{{([^}}]*)\}}", sketch)
         assert match is not None, name

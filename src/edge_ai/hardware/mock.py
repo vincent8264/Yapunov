@@ -17,6 +17,9 @@ class MockHardware(HardwareBackend):
         self.spectrum_columns: tuple[int, ...] = (0,) * 13
         self.spectrum_history: list[tuple[int, ...]] = []
         self.notification_delivered = False
+        self.input_fault: tuple[str, str] | None = None
+        self.input_fault_history: list[tuple[str, str]] = []
+        self.input_recoveries: list[str] = []
 
     def _print(self, message: str) -> None:
         if self.verbose:
@@ -65,6 +68,19 @@ class MockHardware(HardwareBackend):
             return
         self.notification_delivered = delivered
         self._print(f"EMAIL STATUS: {'delivered' if delivered else 'not delivered'}")
+
+    def show_input_fault(self, reason: str, detail: str) -> None:
+        self.input_fault = (reason, detail)
+        self.input_fault_history.append((reason, detail))
+        self.show_alert("microphone_fault")
+        self._print(f"INPUT FAULT: {reason}: {detail}")
+
+    def clear_input_fault(self, reason: str) -> None:
+        self.input_fault = None
+        self.input_recoveries.append(reason)
+        if self.current_alert == "microphone_fault":
+            self.clear_alert()
+        self._print(f"INPUT RECOVERED: {reason}")
 
     def show_spectrum(self, columns: tuple[int, ...]) -> None:
         if len(columns) != 13 or any(

@@ -36,9 +36,11 @@ sys.path.insert(0, str(_IMPORT_ROOT))
 from arduino.app_utils import App  # noqa: E402
 
 from edge_ai.config import load_config  # noqa: E402
+from edge_ai.startup import run_startup_validation  # noqa: E402
 
 _CONFIGURED = load_config(_CONFIG_PATH)
 _READY = False
+STARTUP_SCREEN_SECONDS = 2.0
 
 
 def _cleanup() -> None:
@@ -51,10 +53,37 @@ def _cleanup() -> None:
             close()
 
 
+def _startup() -> None:
+    """Check the board, live microphone, and advisory internet connectivity."""
+    hardware = _CONFIGURED.pipeline.hardware
+    try:
+        report = run_startup_validation(
+            hardware,
+            _CONFIGURED.pipeline.input_source,
+            on_hardware_ready=lambda: hardware.show_startup_status("checking"),
+        )
+    except Exception:
+        # This is best effort: a Bridge failure can also prevent the error image.
+        try:
+            hardware.show_startup_status("failed")
+        except Exception:
+            pass
+        raise
+
+    status = "ready" if report.internet_available else "ready_offline"
+    hardware.show_startup_status(status)
+    print(
+        "startup: board=ok microphone=ok "
+        f"internet={'ok' if report.internet_available else 'unavailable'} "
+        f"({report.internet_detail})"
+    )
+    time.sleep(STARTUP_SCREEN_SECONDS)
+
+
 def loop() -> None:
     global _READY
     if not _READY:
-        _CONFIGURED.pipeline.hardware.check_connection()
+        _startup()
         _READY = True
     started = time.perf_counter()
     period = max(

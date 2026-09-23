@@ -33,6 +33,20 @@ class HardwareBackend(ABC):
     def show_notification_status(self, delivered: bool) -> None:
         """Show whether the current alert's notification was delivered, when supported."""
 
+    def show_startup_status(self, status: str) -> None:
+        """Render a board-specific startup state when supported."""
+
+    def show_input_fault(self, reason: str, detail: str) -> None:
+        """Show that the input is unavailable while recovery is attempted."""
+        self.show_alert("microphone_fault")
+
+    def clear_input_fault(self, reason: str) -> None:
+        """Clear a previously displayed input fault after capture recovers."""
+        self.clear_alert()
+
+    def refresh_status(self) -> None:
+        """Advance deferred status work without changing the current display."""
+
     @abstractmethod
     def apply_decision(self, decision: Decision) -> None: ...
 

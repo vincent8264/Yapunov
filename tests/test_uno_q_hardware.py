@@ -32,6 +32,15 @@ def test_health_check_rejects_unexpected_response() -> None:
         hardware.check_connection()
 
 
+def test_startup_status_calls_bridge_endpoint() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    hardware.show_startup_status("ready_offline")
+
+    assert bridge.calls == [("show_startup_status", "ready_offline")]
+
+
 def test_unverified_actuators_are_guarded_without_bridge_calls() -> None:
     bridge = FakeBridge()
     hardware = UnoQHardware(bridge=bridge)
@@ -104,6 +113,20 @@ def test_email_status_rejects_unexpected_response() -> None:
 
     with pytest.raises(RuntimeError, match="email status"):
         hardware.show_notification_status(False)
+
+
+def test_microphone_fault_uses_matrix_icon_and_clears_after_recovery() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    hardware.show_input_fault("unavailable", "capture failed")
+    hardware.clear_input_fault("unavailable")
+
+    assert bridge.calls == [
+        ("show_alert", "microphone_fault"),
+        ("clear_alert",),
+        ("set_led", False),
+    ]
 
 
 def test_spectrum_is_compact_and_does_not_overwrite_an_alert() -> None:

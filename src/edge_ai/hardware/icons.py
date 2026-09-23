@@ -48,6 +48,17 @@ ICONS: Final[dict[str, Icon]] = {
         "##....##",
         "##....##",
     ),
+    # A microphone capsule and stand crossed by a descending fault slash.
+    "microphone_fault": (
+        "...##..#",
+        "..####.#",
+        "..#####.",
+        "..####..",
+        "#.####.#",
+        ".######.",
+        ".#.##...",
+        "#.####..",
+    ),
 }
 
 
