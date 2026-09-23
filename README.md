@@ -102,6 +102,23 @@ If the microphone is not the default, add its verified name or index as `device`
 the `[input]` section. On Linux, the `sounddevice` package also requires the system's
 PortAudio runtime.
 
+### Capture a microphone recording
+
+Use the included recorder to make a WAV fixture for local testing. It records 16 kHz,
+mono, 16-bit PCM by default, matching YAMNet's expected input rate:
+
+```bash
+uv run python scripts/record_microphone.py
+```
+
+Press Enter when you are ready to record, then press Ctrl+C to stop and save the WAV
+file. The default destination is `runs/recordings/recording-<timestamp>.wav`; choose a
+different source or destination with, for example:
+
+```bash
+uv run python scripts/record_microphone.py --device "MOVO USB-M1" --output runs/doorbell.wav
+```
+
 The live configuration uses `[display]` to sample 50 ms audio chunks at 20 Hz and
 render their 13-band FFT spectrum on the 13×8 matrix. It accumulates those same
 chunks into the unchanged one-second YAMNet inference window. Adjust `floor_db` and
