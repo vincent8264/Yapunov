@@ -34,6 +34,13 @@ BOARD_CONFIG_NAME = "sound-uno-q.toml"
 PASSWORD_FILE_NAME = "smtp-password"
 YAMNET_TEST_MODE = "yamnet-test"
 ONNXRUNTIME_REQUIREMENT = "onnxruntime==1.30.0"
+SHERPA_ONNX_REQUIREMENT = "sherpa-onnx==1.13.8"
+ZIPFORMER_ASSET_NAMES = (
+    "tokens.txt",
+    "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+    "decoder-epoch-99-avg-1-chunk-16-left-128.onnx",
+    "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+)
 
 YAMNET_TEST_CONFIG = """# Generated UNO Q model smoke test configuration.
 [runtime]
@@ -169,35 +176,53 @@ def _write_synthetic_wavs(destination: Path) -> None:
             output.writeframes(pcm.tobytes())
 
 
-def _bundled_model(source: str, config_path: Path) -> tuple[str, list[Path], bool]:
-    """Point inference model paths at ``python/models/`` and list files to copy.
+def _bundled_model(
+    source: str, config_path: Path
+) -> tuple[str, list[tuple[Path, Path]], bool, bool]:
+    """Point inference asset paths at ``python/models/`` and list files to copy.
 
-    Returns the rewritten config, the model files, and whether ONNX Runtime is needed.
+    Returns the rewritten config, ``(source, bundle-relative)`` files, and whether
+    ONNX Runtime and Sherpa-ONNX are required.
     """
     inference = tomllib.loads(source).get("inference", {})
     if not isinstance(inference, dict):
-        return source, [], False
+        return source, [], False, False
 
     references: list[tuple[str, str | None]] = []
+    asr_directories: list[str] = []
 
     def visit(section: dict[str, object]) -> None:
+        component_type = section.get("type")
         model = section.get("model")
         if isinstance(model, str):
-            component_type = section.get("type")
             references.append(
                 (model, component_type if isinstance(component_type, str) else None)
             )
+        if component_type == "transcript_help_yamnet":
+            asr_model_dir = section.get("asr_model_dir")
+            if isinstance(asr_model_dir, str) and asr_model_dir:
+                asr_directories.append(asr_model_dir)
         for value in section.values():
             if isinstance(value, dict):
                 visit(value)
 
     visit(inference)
     if not references:
-        return source, [], False
+        return source, [], False, False
 
-    files: list[Path] = []
+    files: list[tuple[Path, Path]] = []
     names: dict[str, Path] = {}
+    destinations: dict[Path, Path] = {}
     replacements: dict[str, str] = {}
+
+    def include(source_path: Path, destination: Path) -> None:
+        previous = destinations.get(destination)
+        if previous is not None and previous != source_path:
+            raise ValueError(f"bundle path collision: {previous} and {source_path}")
+        destinations[destination] = source_path
+        if (source_path, destination) not in files:
+            files.append((source_path, destination))
+
     for model, component_type in references:
         model_path = (config_path.parent / model).resolve()
         if not model_path.is_file():
@@ -208,29 +233,41 @@ def _bundled_model(source: str, config_path: Path) -> tuple[str, list[Path], boo
         if previous is not None and previous != model_path:
             raise ValueError(f"model filename collision: {previous} and {model_path}")
         names[model_path.name] = model_path
-        if model_path not in files:
-            files.append(model_path)
+        include(model_path, Path("models") / model_path.name)
         replacements[model] = f"models/{model_path.name}"
         if component_type == "yamnet":
             class_map = model_path.with_name("yamnet_class_map.csv")
             if not class_map.is_file():
                 raise ValueError(f"YAMNet class map not found: {class_map}")
-            if class_map not in files:
-                files.append(class_map)
+            include(class_map, Path("models") / class_map.name)
 
-    pattern = re.compile(r'^(model\s*=\s*)("(?:[^"\\]|\\.)*")', flags=re.MULTILINE)
+    for directory in asr_directories:
+        source_directory = (config_path.parent / directory).resolve()
+        if not source_directory.is_dir():
+            raise ValueError(f"Sherpa Zipformer model directory not found: {source_directory}")
+        bundle_directory = Path("models") / source_directory.name
+        for filename in ZIPFORMER_ASSET_NAMES:
+            asset = source_directory / filename
+            if not asset.is_file():
+                raise ValueError(f"Sherpa Zipformer model file not found: {asset}")
+            include(asset, bundle_directory / filename)
+        replacements[directory] = bundle_directory.as_posix()
+
+    pattern = re.compile(
+        r'^(?:model|asr_model_dir)\s*=\s*("(?:[^"\\]|\\.)*")', flags=re.MULTILINE
+    )
 
     def replace_model(match: re.Match[str]) -> str:
-        model = json.loads(match.group(2))
+        model = json.loads(match.group(1))
         replacement = replacements.get(model)
         if replacement is None:
             return match.group(0)
-        return match.group(1) + json.dumps(replacement)
+        return match.group(0).replace(match.group(1), json.dumps(replacement), 1)
 
     rewritten, count = pattern.subn(replace_model, source)
-    if count < len(references):
+    if count < len(references) + len(asr_directories):
         raise ValueError(f"could not rewrite all inference model paths in {config_path}")
-    return rewritten, files, True
+    return rewritten, files, bool(references), bool(asr_directories)
 
 
 def package_app(
@@ -240,6 +277,7 @@ def package_app(
     config_path: Path = CONFIG_SOURCE,
     notifications_config: Path | None = None,
     password: str | None = None,
+    acknowledge_unverified_asr_model_license: bool = False,
 ) -> Path:
     """Write a self-contained app directory and a zip with ``app.yaml`` at its root."""
     if mode not in {"demo", YAMNET_TEST_MODE}:
@@ -260,15 +298,24 @@ def package_app(
             )
         name = "private-sound-alerts-yamnet-test"
         board_config = YAMNET_TEST_CONFIG
-        model_files = [YAMNET_MODEL_SOURCE, YAMNET_CLASS_MAP_SOURCE]
+        model_files = [
+            (YAMNET_MODEL_SOURCE, Path("models") / YAMNET_MODEL_SOURCE.name),
+            (YAMNET_CLASS_MAP_SOURCE, Path("models") / YAMNET_CLASS_MAP_SOURCE.name),
+        ]
         manifest = (APP_SOURCE / "app-yamnet-test.yaml").read_text(encoding="utf-8")
         requirements = (APP_SOURCE / "python" / "requirements-yamnet-test.txt").read_text(
             encoding="utf-8"
         )
     else:
-        source, model_files, needs_onnxruntime = _bundled_model(
+        source, model_files, needs_onnxruntime, needs_sherpa_onnx = _bundled_model(
             config_path.read_text(encoding="utf-8"), config_path
         )
+        if needs_sherpa_onnx and not acknowledge_unverified_asr_model_license:
+            raise ValueError(
+                "the Zipformer checkpoint has no confirmed redistribution license; "
+                "confirm its terms before packaging, then pass "
+                "--acknowledge-unverified-asr-model-license"
+            )
         board_config = _board_config(source, config_path, notifications)
 
         input_section = tomllib.loads(source).get("input", {})
@@ -297,6 +344,8 @@ def package_app(
         requirements = (APP_SOURCE / "python" / "requirements.txt").read_text(encoding="utf-8")
         if needs_onnxruntime:
             requirements = requirements.rstrip() + f"\n{ONNXRUNTIME_REQUIREMENT}\n"
+        if needs_sherpa_onnx:
+            requirements = requirements.rstrip() + f"\n{SHERPA_ONNX_REQUIREMENT}\n"
 
     app_dir = destination / name
     if app_dir.exists():
@@ -309,9 +358,10 @@ def package_app(
     (python_dir / "requirements.txt").write_text(requirements, encoding="utf-8")
     (python_dir / BOARD_CONFIG_NAME).write_text(board_config, encoding="utf-8")
     if model_files:
-        (python_dir / "models").mkdir()
-        for path in model_files:
-            shutil.copy2(path, python_dir / "models" / path.name)
+        for source_path, bundle_path in model_files:
+            target = python_dir / bundle_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, target)
     if mode == YAMNET_TEST_MODE:
         _write_synthetic_wavs(python_dir / "samples")
     if bundled_password is not None:
@@ -379,6 +429,14 @@ def main() -> int:
         default="demo",
         help="package the default demo or the bundled YAMNet model smoke test",
     )
+    parser.add_argument(
+        "--acknowledge-unverified-asr-model-license",
+        action="store_true",
+        help=(
+            "allow bundling the local Zipformer checkpoint after you have verified "
+            "its redistribution terms"
+        ),
+    )
     args = parser.parse_args()
     if args.notifications is not None and args.no_notifications:
         parser.error("--notifications and --no-notifications cannot be used together")
@@ -393,6 +451,9 @@ def main() -> int:
             config_path=args.config.resolve(),
             notifications_config=notifications_config,
             password=_password_for(notifications_config) if notifications_config else None,
+            acknowledge_unverified_asr_model_license=(
+                args.acknowledge_unverified_asr_model_license
+            ),
         )
     except (OSError, ValueError) as exc:
         parser.exit(2, f"error: {exc}\n")

@@ -18,6 +18,11 @@ class InferenceResult:
 
 
 class InferenceEngine(ABC):
+    # Streaming engines consume every microphone frame exactly once and maintain
+    # any longer inference windows internally.  The pipeline uses this to keep
+    # a display's rolling window from being replayed into an ASR stream.
+    accepts_streaming_audio_frames = False
+
     @abstractmethod
     def predict(self, data: Any) -> InferenceResult:
         """Run inference and return a model-independent result."""

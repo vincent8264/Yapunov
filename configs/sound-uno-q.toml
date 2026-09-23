@@ -12,34 +12,35 @@ sample_rate = 16000
 duration_seconds = 1.0
 
 [preprocessing]
-type = "audio_waveform"
-sample_rate = 16000
-duration_seconds = 1.0
-peak_normalize = false
+# The combined streaming inference engine receives each display-sized microphone
+# frame once, then maintains its own ASR stream and rolling YAMNet window.
+type = "identity"
 
 [inference]
-type = "yamnet"
+type = "transcript_help_yamnet"
 model = "../models/yamnet.onnx"
+asr_model_dir = "../models/sherpa-onnx-streaming-zipformer-en-2023-06-26"
 background_threshold = 0.10
+asr_threads = 1
+yamnet_window_seconds = 1.0
+yamnet_hop_seconds = 0.2
 
 [decision]
 type = "sound_events"
 # Starting values only: calibrate these with genuine recordings from the deployment room.
-thresholds = { smoke_alarm = 0.50, glass_break = 0.50, fall_thud = 0.20 }
-confirmations = { smoke_alarm = 1, glass_break = 1, fall_thud = 1 }
+thresholds = { smoke_alarm = 0.50, glass_break = 0.50, fall_thud = 0.20, help_call = 1.00 }
+confirmations = { smoke_alarm = 1, glass_break = 1, fall_thud = 1, help_call = 1 }
 hold_seconds = 5.0
 notification_cooldown_seconds = 30.0
 
 [hardware]
 type = "uno_q"
 
-# Capture and display independent 50 ms chunks. Their 13-band spectrum is animated
-# at 20 Hz; after the first one-second window, YAMNet receives a rolling window every
-# 200 ms (five inferences per second).
+# Capture and display independent 50 ms chunks. Zipformer receives each chunk once;
+# the combined engine retains a rolling one-second YAMNet window every 200 ms.
 [display]
 type = "audio_spectrum"
 rate_hz = 20
-inference_hop_seconds = 0.2
 floor_db = -60.0
 ceiling_db = -6.0
 

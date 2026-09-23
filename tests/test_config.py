@@ -70,12 +70,14 @@ type = "mock"
         load_config(path)
 
 
-def test_uno_q_sound_config_is_live_yamnet() -> None:
+def test_uno_q_sound_config_runs_yamnet_and_streaming_help_asr() -> None:
     with Path("configs/sound-uno-q.toml").open("rb") as file:
         config = tomllib.load(file)
 
     assert config["input"]["type"] == "arduino_microphone"
-    assert config["inference"]["type"] == "yamnet"
+    assert config["inference"]["type"] == "transcript_help_yamnet"
+    assert config["inference"]["asr_model_dir"]
+    assert config["decision"]["thresholds"]["help_call"] == 1.0
     assert config["hardware"]["type"] == "uno_q"
 
 
@@ -125,7 +127,7 @@ def test_board_microphone_display_uses_twenty_hz_chunks(
     path = tmp_path / "board-display.toml"
     path.write_text(
         source.replace('model = "../models/yamnet.onnx"\n', "")
-        .replace('type = "yamnet"', 'type = "dummy"')
+        .replace('type = "transcript_help_yamnet"', 'type = "dummy"')
         .replace('type = "uno_q"', 'type = "mock"'),
         encoding="utf-8",
     )
@@ -139,7 +141,7 @@ def test_board_microphone_display_uses_twenty_hz_chunks(
     configured = load_config(path)
 
     assert configured.pipeline.audio_spectrum is not None
-    assert configured.pipeline.audio_spectrum.inference_hop_seconds == 0.2
+    assert configured.pipeline.audio_spectrum.inference_hop_seconds is None
     assert captured["duration_seconds"] == 0.05
 
 

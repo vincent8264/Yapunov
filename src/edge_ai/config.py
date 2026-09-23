@@ -228,6 +228,7 @@ def _build_audio_spectrum(
             "or 'arduino_microphone'"
         )
     if _component_type(preprocessing_section, "preprocessing") not in {
+        "identity",
         "audio_waveform",
         "audio_features",
     }:

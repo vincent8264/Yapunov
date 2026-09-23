@@ -37,9 +37,10 @@ class Pipeline:
             if not hasattr(data, "samples") or not hasattr(data, "sample_rate"):
                 raise TypeError("audio spectrum requires an AudioFrame input")
             self.hardware.show_spectrum(self.audio_spectrum.update(data))
-            data = self.audio_spectrum.append_for_inference(data)
-            if data is None:
-                return None
+            if not self.inference.accepts_streaming_audio_frames:
+                data = self.audio_spectrum.append_for_inference(data)
+                if data is None:
+                    return None
         processed = self.preprocessor(data)
         result = self.inference.predict(processed)
         decision = self.decision_function(result)

@@ -194,6 +194,44 @@ model = "../models/help-kws.onnx"''',
     assert packaged["inference"]["keyword"]["model"] == "models/help-kws.onnx"
 
 
+def test_transcript_alert_zip_bundles_zipformer_assets_and_requirement(tmp_path: Path) -> None:
+    config = _live_config(tmp_path)
+    asr = tmp_path / "models" / "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+    asr.mkdir()
+    for name in _MODULE.ZIPFORMER_ASSET_NAMES:
+        (asr / name).write_bytes(b"asr-asset")
+    config.write_text(
+        _LIVE_CONFIG.replace(
+            'type = "yamnet"\nmodel = "../models/yamnet.onnx"',
+            '''type = "transcript_help_yamnet"
+model = "../models/yamnet.onnx"
+asr_model_dir = "../models/sherpa-onnx-streaming-zipformer-en-2023-06-26"''',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="no confirmed redistribution license"):
+        _MODULE.package_app(tmp_path / "dist", config_path=config)
+
+    zip_path = _MODULE.package_app(
+        tmp_path / "dist",
+        config_path=config,
+        acknowledge_unverified_asr_model_license=True,
+    )
+
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        packaged = tomllib.loads(archive.read("python/sound-uno-q.toml").decode())
+        requirements = archive.read("python/requirements.txt").decode()
+
+    directory = "python/models/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+    assert {f"{directory}/{name}" for name in _MODULE.ZIPFORMER_ASSET_NAMES} <= names
+    assert packaged["inference"]["asr_model_dir"] == (
+        "models/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+    )
+    assert _MODULE.SHERPA_ONNX_REQUIREMENT in requirements
+
+
 def test_email_zip_requires_password(tmp_path: Path) -> None:
     private = tmp_path / "private.toml"
     private.write_text(_PRIVATE_CONFIG, encoding="utf-8")

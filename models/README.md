@@ -69,22 +69,22 @@ representative UNO Q latency, and the final threshold values here.
 The repository's `spectral_demo` engine is only a deterministic integration baseline
 for simulated audio. It must not be used to claim real-world detection accuracy.
 
-## Laptop transcription model: Sherpa Zipformer English 66M
+## Streaming transcription model: Sherpa Zipformer English 66M
 
-This is a laptop-only speech-to-text evaluation. The standalone `transcribe` command
-does not feed its transcript into the alert policy. The separate laptop-only
-`help-asr-live.example.toml` simulation can emit `help_call` from an exact transcript
-match. A future UNO Q integration must use one microphone stream, fan its
-non-overlapping frames to this ASR engine, and separately retain the rolling one-second
-YAMNet window.
+The standalone `transcribe` command is a laptop speech-to-text diagnostic. The
+`help-asr-live.example.toml` configuration exercises the same adapter with
+`MockHardware`; the canonical UNO Q configuration also uses it to emit `help_call`
+from an exact transcript match. One microphone stream fans non-overlapping 50 ms
+frames to ASR and the adapter separately retains a rolling one-second YAMNet window.
 
 - Source: the `sherpa-onnx-streaming-zipformer-en-2023-06-26` asset from
   [Sherpa-ONNX's `asr-models` release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models),
   converted from
   [`Zengwei/icefall-asr-librispeech-streaming-zipformer-2023-05-17`](https://huggingface.co/Zengwei/icefall-asr-librispeech-streaming-zipformer-2023-05-17).
 - License: the upstream model card has no license metadata. The Icefall and Sherpa
-  inference code are Apache-2.0, but the checkpoint's redistribution terms must be
-  confirmed before it is bundled into an App Lab package or otherwise redistributed.
+  inference code are Apache-2.0, but the checkpoint's redistribution terms remain
+  unconfirmed. The packager requires an explicit acknowledgement before it will bundle
+  this local checkpoint; do not distribute that archive until the terms are confirmed.
   The upstream model has 66.11M parameters and reports 2.83% WER on LibriSpeech
   test-clean with beam search; this is not a claim about this project's microphone or
   deployment room.
@@ -107,11 +107,12 @@ YAMNet window.
   `AFTER EARLY NIGHTFALL THE YELLOW LAMPS WOULD LIGHT UP HERE AND THERE THE SQUALID QUARTER OF THE BROTHELS`
   with `sherpa-onnx==1.13.8` on 2026-09-23. This only proves loading and inference;
   microphone accuracy, latency, memory, and UNO Q compatibility remain unmeasured.
-- Laptop `help` simulation: `TranscriptHelpYAMNetInferenceEngine` detects exact,
+- `help` trigger: `TranscriptHelpYAMNetInferenceEngine` detects exact,
   standalone `help` in changed Zipformer partial or final text and emits the existing
   `help_call` event with confidence `1.0`. This is a deterministic text match, not a
-  calibrated ASR confidence or an emergency-use safety claim. It is connected only to
-  the laptop `MockHardware` configuration. With the local
+  calibrated ASR confidence or an emergency-use safety claim. It is covered by laptop
+  mock-hardware tests and configured for the UNO Q, but has not been run on a board.
+  With the local
   `runs/recordings/help/recording-20260922-172120.wav` fixture followed by one second
   of silence, it emitted `help_call` with transcript `HELP`; that is a smoke test, not
   an accuracy evaluation.

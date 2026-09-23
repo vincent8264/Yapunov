@@ -20,6 +20,8 @@ _HELP_WORD = re.compile(r"(?<![a-z])help(?![a-z])", flags=re.IGNORECASE)
 class TranscriptHelpYAMNetInferenceEngine(InferenceEngine):
     """Fan out raw frames once to ASR and independently to rolling YAMNet windows."""
 
+    accepts_streaming_audio_frames = True
+
     def __init__(
         self,
         yamnet: InferenceEngine,

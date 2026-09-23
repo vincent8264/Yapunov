@@ -62,21 +62,22 @@ def loop() -> None:
         _CONFIGURED.pipeline.poll_interval_seconds,
     )
     step_result = _CONFIGURED.pipeline.step()
-    # A spectrum-enabled pipeline returns only after it has assembled a full model
-    # window; intervening calls still update the matrix visualization.
+    # Streaming ASR pipelines return once per microphone frame; their YAMNet window
+    # is maintained inside the inference adapter while the spectrum keeps updating.
     if step_result is not None:
         result, decision = step_result
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         detector_timings = "".join(
             f" {name}_ms={latency_ms:.1f}" for name, latency_ms in result.timings_ms
         )
+        transcript = f" transcript={result.transcript}" if result.transcript else ""
         print(
             f"label={result.label} confidence={result.confidence:.3f} "
             f"source={result.source or '-'} model_label={result.model_label or '-'} "
             f"model_confidence="
             f"{result.model_confidence if result.model_confidence is not None else 0.0:.3f} "
             f"action={decision.action} event={decision.event or '-'} "
-            f"latency_ms={elapsed_ms:.1f}{detector_timings}"
+            f"latency_ms={elapsed_ms:.1f}{detector_timings}{transcript}"
         )
     delay = period - (time.perf_counter() - started)
     if delay > 0.0:

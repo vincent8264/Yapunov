@@ -122,7 +122,7 @@ copies for temporary experiments:
 | --- | --- |
 | `demo.toml` | Generic, hardware-free sensor pipeline used to verify the reusable architecture. |
 | `hardware-check.toml` | Safe laptop hardware-check plan using `MockHardware`; actuator checks remain opt-in. |
-| `sound-uno-q.toml` | Canonical UNO Q deployment: board microphone input, YAMNet, decision policy, and real matrix output. This is the only committed UNO Q pipeline config. |
+| `sound-uno-q.toml` | Canonical UNO Q deployment: one board microphone stream fanned out to Zipformer `help` transcription and YAMNet, plus decision policy and matrix output. This is the only committed UNO Q pipeline config. |
 | `private-live.example.toml` | Template for a private SMTP-enabled configuration. Copy it to ignored `private-live.toml` and never commit credentials. |
 | `help-live.example.toml` | Optional scheduled YAMNet plus `help` keyword configuration; it requires a separately validated keyword model. |
 | `help-asr-live.example.toml` | Laptop-only simulation that emits `help_call` when the local Zipformer transcript contains standalone `help`, while continuing YAMNet sound-event inference. |
@@ -140,9 +140,10 @@ uv run pytest
 ### Laptop speech-to-text test
 
 The optional streaming transcription command uses Sherpa-ONNX's larger English
-Zipformer 66M model. It is deliberately separate from the alert decision path while
-we measure it on the laptop. Install the optional dependency once, then download and
-unpack the model once; normal runtime does not use the network:
+Zipformer 66M model. The standalone command is useful for microphone testing; the
+same streaming adapter is also selected by the canonical UNO Q configuration. Install
+the optional dependency once, then download and unpack the model once; normal runtime
+does not use the network:
 
 ```bash
 uv sync --extra asr
@@ -157,17 +158,19 @@ endpointed final text. Use `--device "Microphone name"` or a verified numeric de
 index if the default microphone is not correct. `--threads 1` is the intended starting
 point for later co-running this ASR stream with YAMNet.
 
-To simulate `help` as a local danger event on a laptop, with no Arduino entry point or
+To exercise `help` as a local danger event on a laptop, with no Arduino hardware or
 notifications, run:
 
 ```bash
 uv run --extra asr edge-ai run --config configs/help-asr-live.example.toml
 ```
 
-The simulation sends each 200 ms microphone frame to Zipformer once. A changed partial
-or final transcript containing standalone `help` emits `help_call` at confidence 1.0;
-`helping` does not match. Independently, YAMNet receives a rolling one-second window
-every 200 ms. This is a prototype trigger, not a safety-ready emergency detector:
+The laptop configuration sends each 200 ms microphone frame to Zipformer once. The
+UNO Q configuration uses the same engine with 50 ms display frames, again feeding ASR
+each frame exactly once. A changed partial or final transcript containing standalone
+`help` emits `help_call` at confidence 1.0; `helping` does not match. Independently,
+YAMNet receives a rolling one-second window every 200 ms. This is a prototype trigger,
+not a safety-ready emergency detector:
 validate false positives and missed calls using consented recordings before connecting
 it to notifications or hardware.
 
@@ -353,15 +356,18 @@ still be verified on the physical UNO Q before field use.
 App Lab deploys one app, not this repository. Build that app, then import the zip:
 
 ```bash
-uv run python scripts/package_app_lab.py
+uv run python scripts/package_app_lab.py --acknowledge-unverified-asr-model-license
 ```
 
 When `configs/private-live.toml` exists, this writes the email-enabled
 `dist/private-sound-alerts-live-email.zip`; it contains that file's SMTP settings and
 password. Keep the archive private. Without the private config, it writes
 `dist/private-sound-alerts-live.zip`. The archive root contains `app.yaml`, the
-sketch, the live UNO Q configuration, YAMNet, and its class map. To deliberately
-build the non-email archive while the private config exists, add `--no-notifications`.
+sketch, the live UNO Q configuration, YAMNet and its class map, plus the four local
+Zipformer assets. The acknowledgement is deliberately required because the upstream
+Zipformer checkpoint does not state redistribution terms; do not create or share an
+archive until you have verified those terms. To deliberately build the non-email
+archive while the private config exists, add `--no-notifications`.
 
 Before adding a microphone, validate the real bundled YAMNet model with deterministic
 WAV fixtures:
@@ -387,19 +393,21 @@ already finished:
 
 App Lab compiles `sketch/sketch.ino` onto the board's microcontroller and starts
 `python/main.py` on the Linux side. The app reads the first USB microphone through
-App Lab's ALSA microphone peripheral, runs YAMNet locally, and calls `show_alert` so
-the onboard matrix draws the detected event. The UNO Q's single USB-C port must carry
-a powered USB-C hub with the microphone attached, so run App Lab in Network Mode with
-the board on Wi-Fi. The first start also needs internet to install `onnxruntime`. The
-log prints YAMNet's top AudioSet label on each line (`model_label=Alarm`), which helps
-tune the thresholds in the live config.
+App Lab's ALSA microphone peripheral, streams each 50 ms frame to Zipformer once, and
+keeps an independent rolling YAMNet window. It calls `show_alert` so the onboard matrix
+draws the detected event. The UNO Q's single USB-C port must carry a powered USB-C hub
+with the microphone attached, so run App Lab in Network Mode with the board on Wi-Fi.
+The first start needs internet to install both `onnxruntime` and `sherpa-onnx`. The log
+prints YAMNet's top AudioSet label and changed transcripts, which helps tune the live
+configuration. Verify sustained board CPU/RAM and microphone latency before relying on
+the new trigger.
 
 To send email from the board as well, first confirm delivery from the laptop with
 `edge-ai test-notification`, then build the email variant:
 
 ```bash
 export EDGE_AI_SMTP_PASSWORD='your-smtp-app-password'
-uv run python scripts/package_app_lab.py --notifications configs/private-live.toml
+uv run python scripts/package_app_lab.py --notifications configs/private-live.toml --acknowledge-unverified-asr-model-license
 ```
 
 This writes `dist/private-sound-alerts-live-email.zip`. The same private configuration
