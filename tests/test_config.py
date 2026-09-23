@@ -8,11 +8,12 @@ from edge_ai.config import (
     load_config,
     load_hardware_check_config,
     load_notification_config,
+    load_setup_server_config,
 )
 from edge_ai.hardware.mock import MockHardware
 from edge_ai.inputs.audio import MicrophoneHealthInput
 from edge_ai.inputs.simulated_sensor import SimulatedSensorInput
-from edge_ai.notifications import SMTPNotifier
+from edge_ai.notifications import NotifyingHardware, SMTPNotifier
 from edge_ai.settings import NotificationPreferences, save_notification_preferences
 
 
@@ -492,6 +493,35 @@ status_log = true
     assert str(configured.local_timezone) == "America/Los_Angeles"
 
 
+def test_setup_server_config_resolves_private_files_from_config(tmp_path: Path) -> None:
+    path = tmp_path / "board.toml"
+    path.write_text(
+        """
+[setup]
+enabled = true
+host = "0.0.0.0"
+port = 8123
+pin_file = "private/setup-pin"
+""",
+        encoding="utf-8",
+    )
+
+    configured = load_setup_server_config(path)
+
+    assert configured.enabled
+    assert configured.host == "0.0.0.0"
+    assert configured.port == 8123
+    assert configured.pin_path == (tmp_path / "private" / "setup-pin").resolve()
+
+
+def test_lan_setup_server_requires_a_pin_file(tmp_path: Path) -> None:
+    path = tmp_path / "board.toml"
+    path.write_text('[setup]\nenabled = true\nhost = "0.0.0.0"\n', encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="pin_file.*required"):
+        load_setup_server_config(path)
+
+
 def test_unknown_notification_timezone_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "notifications.toml"
     path.write_text(
@@ -641,3 +671,39 @@ password_env = "MISSING_TEST_SMTP_PASSWORD"
 
     assert configured.notifier is None
     assert configured.device_name == "Kitchen"
+
+
+def test_disabled_smtp_pipeline_can_be_enabled_later_without_restart(tmp_path: Path) -> None:
+    config = tmp_path / "pipeline.toml"
+    config.write_text(
+        """
+[runtime]
+[input]
+type = "simulated_sensor"
+[preprocessing]
+type = "identity"
+[inference]
+type = "dummy"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+verbose = false
+[notifications]
+type = "smtp"
+settings_file = "settings.json"
+host = "smtp.example.com"
+sender = "monitor@example.com"
+recipient = "family@example.com"
+""",
+        encoding="utf-8",
+    )
+    save_notification_preferences(
+        tmp_path / "settings.json",
+        NotificationPreferences("family@example.com", "Kitchen", "UTC", False),
+    )
+
+    configured = load_config(config)
+
+    assert isinstance(configured.pipeline.hardware, NotifyingHardware)
+    assert configured.pipeline.hardware.notifier is None

@@ -70,7 +70,14 @@ def test_email_zip_bundles_password_file_outside_config(tmp_path: Path) -> None:
     notifications = tomllib.loads(config_text)["notifications"]
     assert notifications["type"] == "smtp"
     assert notifications["password_file"] == "smtp-password"
+    assert notifications["settings_file"] == "notification-settings.json"
     assert "password_env" not in notifications
+    assert tomllib.loads(config_text)["setup"] == {
+        "enabled": True,
+        "host": "0.0.0.0",
+        "port": 8080,
+        "pin_file": "setup-pin",
+    }
     assert tomllib.loads(config_text)["hardware"]["type"] == "uno_q"
 
     board_python = tmp_path / "dist" / "private-sound-alerts-live-email" / "python"

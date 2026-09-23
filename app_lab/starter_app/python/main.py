@@ -35,20 +35,40 @@ sys.path.insert(0, str(_IMPORT_ROOT))
 
 from arduino.app_utils import App  # noqa: E402
 
-from edge_ai.config import load_config  # noqa: E402
+from edge_ai.config import load_config, load_notification_config  # noqa: E402
+from edge_ai.notifications import NotifyingHardware  # noqa: E402
+from edge_ai.settings import NotificationPreferences  # noqa: E402
+from edge_ai.setup_server import start_configured_setup_server  # noqa: E402
 
 _CONFIGURED = load_config(_CONFIG_PATH)
 _READY = False
+_SETUP_SERVER = None
+
+
+def _reload_notifications(_: NotificationPreferences) -> None:
+    hardware = _CONFIGURED.pipeline.hardware
+    if not isinstance(hardware, NotifyingHardware):
+        raise RuntimeError("the running pipeline is not configured for email notifications")
+    configured = load_notification_config(_CONFIG_PATH, asynchronous=True)
+    hardware.reconfigure_notifications(
+        configured.notifier,
+        device_name=configured.device_name,
+        local_timezone=configured.local_timezone,
+    )
 
 
 def _cleanup() -> None:
     hardware = _CONFIGURED.pipeline.hardware
     try:
-        hardware.shutdown()
+        if _SETUP_SERVER is not None:
+            _SETUP_SERVER.close()
     finally:
-        close = getattr(_CONFIGURED.pipeline.input_source, "close", None)
-        if callable(close):
-            close()
+        try:
+            hardware.shutdown()
+        finally:
+            close = getattr(_CONFIGURED.pipeline.input_source, "close", None)
+            if callable(close):
+                close()
 
 
 def loop() -> None:
@@ -84,4 +104,8 @@ def loop() -> None:
 
 
 atexit.register(_cleanup)
+_SETUP_SERVER = start_configured_setup_server(
+    _CONFIG_PATH,
+    on_saved=_reload_notifications,
+)
 App.run(user_loop=loop)

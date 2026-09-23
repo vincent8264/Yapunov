@@ -269,7 +269,7 @@ class NotifyingHardware(HardwareBackend):
     def __init__(
         self,
         hardware: HardwareBackend,
-        notifier: Notifier,
+        notifier: Notifier | None,
         *,
         device_name: str,
         local_timezone: tzinfo = timezone.utc,
@@ -283,6 +283,23 @@ class NotifyingHardware(HardwareBackend):
         self.last_notification_error: str | None = None
         self._displayed_notification: Notification | None = None
         self._input_fault: tuple[str, str] | None = None
+        self._notification_lock = threading.RLock()
+
+    def reconfigure_notifications(
+        self,
+        notifier: Notifier | None,
+        *,
+        device_name: str,
+        local_timezone: tzinfo,
+    ) -> None:
+        """Atomically replace delivery settings while the detector keeps running."""
+        with self._notification_lock:
+            previous = self.notifier
+            self.notifier = notifier
+            self.device_name = device_name
+            self.local_timezone = local_timezone
+        if previous is not None and previous is not notifier:
+            previous.close()
 
     def check_connection(self) -> None:
         self.hardware.check_connection()
@@ -315,7 +332,10 @@ class NotifyingHardware(HardwareBackend):
 
     def _forward_delivery_results(self) -> None:
         # Results for alerts that are no longer on screen must not light the new one.
-        for alert, delivered in self.notifier.drain_delivery_results():
+        with self._notification_lock:
+            notifier = self.notifier
+            results = notifier.drain_delivery_results() if notifier is not None else []
+        for alert, delivered in results:
             if alert is self._displayed_notification:
                 self.hardware.show_notification_status(delivered)
 
@@ -324,8 +344,11 @@ class NotifyingHardware(HardwareBackend):
             self._displayed_notification = notification
         delivered = False
         try:
-            self.notifier.notify(notification)
-            delivered = not self.notifier.delivers_later
+            with self._notification_lock:
+                notifier = self.notifier
+                if notifier is not None:
+                    notifier.notify(notification)
+                    delivered = not notifier.delivers_later
         except Exception as exc:
             self.last_notification_error = f"{type(exc).__name__}: {exc}"
         if displayed:
@@ -380,11 +403,14 @@ class NotifyingHardware(HardwareBackend):
         ):
             self._displayed_notification = None
         if decision.notify and decision.event is not None:
+            with self._notification_lock:
+                device_name = self.device_name
+                local_timezone = self.local_timezone
             alert = AlertNotification(
                 event=decision.event,
                 confidence=decision.confidence or 0.0,
-                device_name=self.device_name,
-                timestamp=self.clock(self.local_timezone).isoformat(timespec="seconds"),
+                device_name=device_name,
+                timestamp=self.clock(local_timezone).isoformat(timespec="seconds"),
             )
             self._notify(alert, displayed=True)
 
@@ -392,4 +418,8 @@ class NotifyingHardware(HardwareBackend):
         try:
             self.hardware.shutdown()
         finally:
-            self.notifier.close()
+            with self._notification_lock:
+                notifier = self.notifier
+                self.notifier = None
+            if notifier is not None:
+                notifier.close()

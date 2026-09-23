@@ -8,8 +8,10 @@ from datetime import datetime
 from html import escape
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
 from pathlib import Path
 import secrets
+import threading
 from typing import Final
 from urllib.parse import parse_qs, urlsplit
 
@@ -17,6 +19,7 @@ from edge_ai.config import (
     ConfigError,
     build_notification_test_notifier,
     load_notification_setup_config,
+    load_setup_server_config,
 )
 from edge_ai.notifications import AlertNotification
 from edge_ai.settings import (
@@ -43,7 +46,7 @@ class PortalResult:
 
 
 class SetupPortal:
-    """Own the short-lived setup session and its one-time PIN."""
+    """Own a PIN-protected setup session."""
 
     def __init__(
         self,
@@ -52,6 +55,7 @@ class SetupPortal:
         pin: str | None,
         csrf_token: str | None = None,
         test_sender: Callable[[NotificationPreferences], None] | None = None,
+        on_saved: Callable[[NotificationPreferences], None] | None = None,
     ) -> None:
         if pin is not None and (not pin.isdigit() or len(pin) != 6):
             raise ValueError("setup PIN must contain exactly six digits")
@@ -62,6 +66,7 @@ class SetupPortal:
         self.pin = pin
         self.csrf_token = csrf_token or secrets.token_urlsafe(24)
         self._test_sender = test_sender or self._send_test_email
+        self._on_saved = on_saved
 
     def _send_test_email(self, preferences: NotificationPreferences) -> None:
         configured = build_notification_test_notifier(self.config_path, preferences)
@@ -100,16 +105,27 @@ class SetupPortal:
             action = form.get("action")
             if action == "test":
                 self._test_sender(preferences)
-                save_notification_preferences(self.settings_path, preferences)
-                self.preferences = preferences
+                self._save(preferences)
                 return PortalResult("Test email delivered. These settings are now saved.")
             if action == "save":
-                save_notification_preferences(self.settings_path, preferences)
-                self.preferences = preferences
+                self._save(preferences)
                 return PortalResult("Notification settings saved on this device.")
             return PortalResult("Choose Save settings or Save and send test.", True)
         except (ConfigError, RuntimeError, SettingsError) as exc:
             return PortalResult(str(exc), True)
+
+    def _save(self, preferences: NotificationPreferences) -> None:
+        save_notification_preferences(self.settings_path, preferences)
+        self.preferences = preferences
+        if self._on_saved is None:
+            return
+        try:
+            self._on_saved(preferences)
+        except Exception as exc:
+            raise RuntimeError(
+                "Settings were saved, but the running detector could not reload them: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
     def render(self, result: PortalResult | None = None) -> bytes:
         preferences = self.preferences
@@ -258,6 +274,89 @@ def _handler_for(portal: SetupPortal, emit: Callable[[str], None]) -> type[BaseH
             emit(f"setup request: {self.address_string()} {format % args}")
 
     return SetupRequestHandler
+
+
+class BackgroundSetupServer:
+    """Own a setup HTTP server running alongside the detector."""
+
+    def __init__(self, server: ThreadingHTTPServer, thread: threading.Thread) -> None:
+        self.server = server
+        self.thread = thread
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2.0)
+
+
+def _persistent_pin(path: Path) -> str:
+    """Load or atomically create the six-digit PIN used by the LAN portal."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        pin = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        pin = f"{secrets.randbelow(1_000_000):06d}"
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pin = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError(f"could not create setup PIN file {path}: {exc}") from exc
+        else:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+                file.write(pin + "\n")
+    except OSError as exc:
+        raise RuntimeError(f"could not read setup PIN file {path}: {exc}") from exc
+    if not pin.isdigit() or len(pin) != 6:
+        raise RuntimeError(f"setup PIN file must contain exactly six digits: {path}")
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        raise RuntimeError(f"could not secure setup PIN file {path}: {exc}") from exc
+    return pin
+
+
+def start_configured_setup_server(
+    config_path: Path,
+    *,
+    on_saved: Callable[[NotificationPreferences], None] | None = None,
+    emit: Callable[[str], None] = print,
+) -> BackgroundSetupServer | None:
+    """Start the configured portal in a daemon thread, or return None when disabled."""
+    configured = load_setup_server_config(config_path)
+    if not configured.enabled:
+        return None
+    is_loopback = configured.host in {"127.0.0.1", "localhost", "::1"}
+    pin = None
+    if not is_loopback:
+        assert configured.pin_path is not None
+        pin = _persistent_pin(configured.pin_path)
+    portal = SetupPortal(config_path, pin=pin, on_saved=on_saved)
+    server = ThreadingHTTPServer(
+        (configured.host, configured.port), _handler_for(portal, emit)
+    )
+    server.daemon_threads = True
+    thread = threading.Thread(
+        target=server.serve_forever,
+        daemon=True,
+        name="notification-setup-server",
+    )
+    thread.start()
+    display_host = (
+        configured.host
+        if configured.host not in {"0.0.0.0", "::"}
+        else "<device-ip>"
+    )
+    emit(f"Notification setup: http://{display_host}:{configured.port}")
+    if pin is None:
+        emit("Setup is restricted to this device; no PIN is required.")
+    else:
+        emit(f"Setup PIN: {pin}")
+    return BackgroundSetupServer(server, thread)
 
 
 def run_setup_server(
