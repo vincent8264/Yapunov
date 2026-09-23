@@ -71,6 +71,42 @@ type = "mock"
         load_config(path)
 
 
+def test_health_enabled_microphone_open_failure_becomes_runtime_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "health-live.toml"
+    path.write_text(
+        """
+[runtime]
+[input]
+type = "microphone"
+[input.health]
+enabled = true
+[preprocessing]
+type = "audio_waveform"
+[inference]
+type = "dummy"
+[decision]
+type = "default"
+[hardware]
+type = "mock"
+""",
+        encoding="utf-8",
+    )
+
+    def unavailable_microphone(**_: object) -> object:
+        raise RuntimeError("microphone is already in use")
+
+    monkeypatch.setattr("edge_ai.config.MicrophoneInput", unavailable_microphone)
+
+    configured = load_config(path)
+
+    assert isinstance(configured.pipeline.input_source, MicrophoneHealthInput)
+    assert configured.pipeline.input_source.source is None
+    assert configured.pipeline.step() is None
+    assert configured.pipeline.hardware.current_alert == "microphone_fault"
+
+
 def test_uno_q_sound_config_is_live_yamnet() -> None:
     with Path("configs/sound-uno-q.toml").open("rb") as file:
         config = tomllib.load(file)
@@ -160,7 +196,8 @@ def test_board_microphone_display_uses_twenty_hz_chunks(
     assert configured.pipeline.audio_spectrum.inference_hop_seconds == 0.2
     assert captured["duration_seconds"] == 0.05
     assert isinstance(configured.pipeline.input_source, MicrophoneHealthInput)
-    assert configured.pipeline.input_source.source_factory is None
+    assert configured.pipeline.input_source.source_factory is not None
+    assert configured.pipeline.input_source.reopen_on_fault is False
 
 
 @pytest.mark.parametrize(

@@ -154,6 +154,11 @@ enabled, the first fault sends one metadata-only warning, the matrix status colu
 lights after delivery, and a later recovery sends one follow-up email. Repeated retry
 failures do not generate duplicate messages.
 
+If the microphone is absent or still claimed by an earlier process when the app
+starts, the health wrapper also keeps the pipeline alive and retries opening it every
+two seconds. This startup case uses the same fault icon and notification transition
+instead of terminating the App Lab container.
+
 For the physical demo, start with the live spectrum visible, unplug only the USB
 microphone, and leave the UNO Q and powered hub connected. Verify the fault icon and
 warning email, reconnect the microphone, make a short sound, and verify that the

@@ -52,9 +52,11 @@ class MicrophoneHealthInput(InputSource):
 
     def __init__(
         self,
-        source: InputSource,
+        source: InputSource | None,
         *,
         source_factory: Callable[[], InputSource] | None = None,
+        reopen_on_fault: bool = True,
+        initial_error: Exception | None = None,
         failure_seconds: float = 5.0,
         silence_threshold: float = 0.0,
         detect_frozen: bool = True,
@@ -67,8 +69,11 @@ class MicrophoneHealthInput(InputSource):
             raise ValueError("microphone health silence_threshold must be between 0 and 1")
         if retry_interval_seconds <= 0.0:
             raise ValueError("microphone health retry_interval_seconds must be positive")
+        if source is None and source_factory is None:
+            raise ValueError("microphone health requires a source or source_factory")
         self.source: InputSource | None = source
         self.source_factory = source_factory
+        self.reopen_on_fault = reopen_on_fault
         self.failure_seconds = failure_seconds
         self.silence_threshold = silence_threshold
         self.detect_frozen = detect_frozen
@@ -77,9 +82,20 @@ class MicrophoneHealthInput(InputSource):
         self._silent_seconds = 0.0
         self._frozen_seconds = 0.0
         self._previous: AudioFrame | None = None
-        self._fault: MicrophoneHealthError | None = None
+        self._fault: MicrophoneHealthError | None = (
+            MicrophoneHealthError(
+                "unavailable",
+                f"microphone open failed: {type(initial_error).__name__}: {initial_error}",
+            )
+            if initial_error is not None
+            else None
+        )
         self._recovered_reason: str | None = None
-        self._next_retry_at = 0.0
+        self._next_retry_at = (
+            self._clock() + self.retry_interval_seconds
+            if initial_error is not None
+            else 0.0
+        )
 
     def _close_source(self, *, suppress_errors: bool) -> None:
         if self.source is None:
@@ -103,12 +119,18 @@ class MicrophoneHealthInput(InputSource):
         self._silent_seconds = 0.0
         self._frozen_seconds = 0.0
         self._previous = None
-        if self.source_factory is not None:
+        if self.source_factory is not None and (
+            self.source is None or self.reopen_on_fault
+        ):
             self._next_retry_at = self._clock() + self.retry_interval_seconds
         return fault
 
     def _ensure_source(self) -> InputSource:
-        if self._fault is not None and self.source_factory is not None:
+        if (
+            self._fault is not None
+            and self.source_factory is not None
+            and (self.source is None or self.reopen_on_fault)
+        ):
             if self._clock() < self._next_retry_at:
                 raise self._fault
             # Report the fault before touching a disconnected peripheral. Some

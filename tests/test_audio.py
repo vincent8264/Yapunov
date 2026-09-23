@@ -299,6 +299,35 @@ def test_microphone_health_recovers_when_existing_source_resumes() -> None:
     assert delegate.closed is False
 
 
+def test_microphone_health_retries_initial_open_failure() -> None:
+    now = [0.0]
+    recovered_frame = AudioFrame(np.array([0.02, -0.02], dtype=np.float32), 2)
+    recovered = _FrameInput([recovered_frame])
+    factory_calls = 0
+
+    def factory() -> InputSource:
+        nonlocal factory_calls
+        factory_calls += 1
+        return recovered
+
+    source = MicrophoneHealthInput(
+        None,
+        source_factory=factory,
+        initial_error=RuntimeError("microphone is already in use"),
+        retry_interval_seconds=2.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(MicrophoneHealthError, match="already in use"):
+        source.read()
+    assert factory_calls == 0
+
+    now[0] = 2.0
+    assert source.read() is recovered_frame
+    assert source.take_recovered_reason() == "unavailable"
+    assert factory_calls == 1
+
+
 def test_microphone_health_reopens_source_and_reports_recovery() -> None:
     now = [10.0]
     failed = _FrameInput([RuntimeError("device disappeared")])

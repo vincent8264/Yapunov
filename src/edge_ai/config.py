@@ -211,17 +211,21 @@ def _build_input(
                 else _number(section, "duration_seconds", 1.0),
                 device=device,
             )
-            source = source_factory()
             if not health_enabled:
-                return source
+                return source_factory()
+            initial_error: Exception | None = None
+            try:
+                source = source_factory()
+            except Exception as exc:
+                source = None
+                initial_error = exc
             return MicrophoneHealthInput(
                 source,
-                # App Lab's ALSAMicrophone retries a removed USB device internally.
-                # Recreating it from outside can close the stream just as hot-plug
-                # recovery succeeds, so only the desktop sounddevice path reopens.
-                source_factory=(
-                    source_factory if component_type == "microphone" else None
-                ),
+                source_factory=source_factory,
+                # Once open, App Lab's ALSAMicrophone handles USB hot-plug retries
+                # internally. The factory remains available for startup failures.
+                reopen_on_fault=component_type == "microphone",
+                initial_error=initial_error,
                 failure_seconds=health_failure_seconds,
                 silence_threshold=health_silence_threshold,
                 detect_frozen=health_detect_frozen,
