@@ -86,6 +86,26 @@ def test_generic_alert_falls_back_to_builtin_led() -> None:
     assert bridge.calls == [("set_led", True)]
 
 
+def test_email_status_is_sent_only_while_an_alert_is_shown() -> None:
+    bridge = FakeBridge()
+    hardware = UnoQHardware(bridge=bridge)
+
+    hardware.show_notification_status(True)
+    hardware.show_alert("fall_thud")
+    hardware.show_notification_status(True)
+
+    assert bridge.calls == [("show_alert", "fall_thud"), ("set_email_status", True)]
+
+
+def test_email_status_rejects_unexpected_response() -> None:
+    hardware = UnoQHardware(bridge=FakeBridge())
+    hardware.show_alert("fall_thud")
+    hardware._bridge = FakeBridge("unknown method")  # type: ignore[attr-defined]
+
+    with pytest.raises(RuntimeError, match="email status"):
+        hardware.show_notification_status(False)
+
+
 def test_spectrum_is_compact_and_does_not_overwrite_an_alert() -> None:
     bridge = FakeBridge()
     hardware = UnoQHardware(bridge=bridge)

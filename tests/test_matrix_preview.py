@@ -47,7 +47,7 @@ class FakeTk:
 
 
 def test_matrix_preview_draws_spectrum_and_preserves_alert_priority() -> None:
-    preview = MatrixPreviewHardware(tk_module=FakeTk, pixel_size=8)
+    preview = MatrixPreviewHardware(tk_module=FakeTk, pixel_size=8, clock=lambda: 0.0)
 
     preview.show_spectrum((0, 1, 2, 3, 4, 5, 6, 7, 8, 7, 6, 5, 4))
     assert len(preview._canvas.fills) == 104  # type: ignore[attr-defined]
@@ -56,4 +56,31 @@ def test_matrix_preview_draws_spectrum_and_preserves_alert_priority() -> None:
     preview.show_spectrum((8,) * 13)
 
     assert preview._canvas.fills == before  # type: ignore[attr-defined]
+    preview.shutdown()
+
+
+def _pixel_fill(preview: MatrixPreviewHardware, x: int, y: int) -> str:
+    return preview._canvas.fills[y * 13 + x + 1]  # type: ignore[attr-defined]
+
+
+def test_matrix_preview_blinks_icon_against_background_and_shows_email_bar() -> None:
+    now = [0.0]
+    preview = MatrixPreviewHardware(tk_module=FakeTk, pixel_size=8, clock=lambda: now[0])
+    preview.show_alert("smoke_alarm")
+    # Row 0 of the smoke icon is ".#..#..#", drawn from x=2: x=3 is icon, x=0 is background.
+    icon_on, background_dim = _pixel_fill(preview, 3, 0), _pixel_fill(preview, 0, 0)
+    status_off = _pixel_fill(preview, 12, 0)
+
+    now[0] = 0.6
+    preview.show_spectrum((0,) * 13)
+
+    assert _pixel_fill(preview, 3, 0) == background_dim
+    assert _pixel_fill(preview, 0, 0) == icon_on
+    assert _pixel_fill(preview, 12, 0) == status_off
+
+    preview.show_notification_status(True)
+    assert all(_pixel_fill(preview, 12, y) == icon_on for y in range(8))
+
+    preview.clear_alert()
+    assert _pixel_fill(preview, 12, 0) == status_off
     preview.shutdown()

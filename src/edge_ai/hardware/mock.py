@@ -16,6 +16,7 @@ class MockHardware(HardwareBackend):
         self.alert_history: list[str] = []
         self.spectrum_columns: tuple[int, ...] = (0,) * 13
         self.spectrum_history: list[tuple[int, ...]] = []
+        self.notification_delivered = False
 
     def _print(self, message: str) -> None:
         if self.verbose:
@@ -41,6 +42,8 @@ class MockHardware(HardwareBackend):
         self._print(f"SERVO {channel} -> {degrees:.1f} degrees")
 
     def show_alert(self, event: str) -> None:
+        if event != self.current_alert:
+            self.notification_delivered = False
         self.current_alert = event
         self.alert_history.append(event)
         self._print(f"DISPLAY: {event}")
@@ -54,7 +57,14 @@ class MockHardware(HardwareBackend):
 
     def clear_alert(self) -> None:
         self.current_alert = None
+        self.notification_delivered = False
         self.set_led(False)
+
+    def show_notification_status(self, delivered: bool) -> None:
+        if self.current_alert is None:
+            return
+        self.notification_delivered = delivered
+        self._print(f"EMAIL STATUS: {'delivered' if delivered else 'not delivered'}")
 
     def show_spectrum(self, columns: tuple[int, ...]) -> None:
         if len(columns) != 13 or any(

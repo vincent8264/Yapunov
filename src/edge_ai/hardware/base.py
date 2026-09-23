@@ -30,6 +30,9 @@ class HardwareBackend(ABC):
     def show_spectrum(self, columns: tuple[int, ...]) -> None:
         """Render a low-priority 13-band audio spectrum when supported."""
 
+    def show_notification_status(self, delivered: bool) -> None:
+        """Show whether the current alert's notification was delivered, when supported."""
+
     @abstractmethod
     def apply_decision(self, decision: Decision) -> None: ...
 

@@ -64,6 +64,66 @@ def test_notification_failure_does_not_cancel_local_alert() -> None:
     assert hardware.last_notification_error == "OSError: network unavailable"
 
 
+def test_synchronous_delivery_lights_status_and_failure_leaves_it_off() -> None:
+    delivered_hw = MockHardware(verbose=False)
+    NotifyingHardware(delivered_hw, RecordingNotifier(), device_name="Kitchen").apply_decision(
+        Decision("alert", event="smoke_alarm", confidence=0.9, notify=True)
+    )
+    failed_hw = MockHardware(verbose=False)
+    NotifyingHardware(failed_hw, FailingNotifier(), device_name="Kitchen").apply_decision(
+        Decision("alert", event="smoke_alarm", confidence=0.9, notify=True)
+    )
+
+    assert delivered_hw.notification_delivered is True
+    assert failed_hw.notification_delivered is False
+
+
+class QueuedNotifier(Notifier):
+    """Deterministic stand-in for AsyncNotifier: results are released by the test."""
+
+    delivers_later = True
+
+    def __init__(self) -> None:
+        self.alerts: list[AlertNotification] = []
+        self.results: list[tuple[AlertNotification, bool]] = []
+
+    def notify(self, alert: AlertNotification) -> None:
+        self.alerts.append(alert)
+
+    def drain_delivery_results(self) -> list[tuple[AlertNotification, bool]]:
+        results, self.results = self.results, []
+        return results
+
+
+def test_later_delivery_updates_status_on_next_main_thread_call() -> None:
+    physical = MockHardware(verbose=False)
+    notifier = QueuedNotifier()
+    hardware = NotifyingHardware(physical, notifier, device_name="Kitchen")
+
+    hardware.apply_decision(Decision("alert", event="glass_break", confidence=0.9, notify=True))
+    assert physical.notification_delivered is False
+
+    notifier.results.append((notifier.alerts[0], True))
+    hardware.show_spectrum((0,) * 13)
+
+    assert physical.notification_delivered is True
+
+
+def test_stale_delivery_result_does_not_light_a_later_alert() -> None:
+    physical = MockHardware(verbose=False)
+    notifier = QueuedNotifier()
+    hardware = NotifyingHardware(physical, notifier, device_name="Kitchen")
+
+    hardware.apply_decision(Decision("alert", event="glass_break", confidence=0.9, notify=True))
+    hardware.apply_decision(Decision("idle"))
+    hardware.apply_decision(Decision("alert", event="fall_thud", confidence=0.9, notify=False))
+    notifier.results.append((notifier.alerts[0], True))
+    hardware.show_spectrum((0,) * 13)
+
+    assert physical.current_alert == "fall_thud"
+    assert physical.notification_delivered is False
+
+
 def test_fixed_messages_use_cautious_event_specific_copy() -> None:
     glass = render_notification_message(
         AlertNotification(
@@ -185,3 +245,6 @@ def test_async_notifier_reports_delivery_and_failure() -> None:
     assert delivered == ["notification delivered: channel=notification event=glass_break"]
     assert len(failed) == 1
     assert failed[0].startswith("notification failed: channel=notification event=glass_break")
+    assert successful.drain_delivery_results() == [(alert, True)]
+    assert failing.drain_delivery_results() == [(alert, False)]
+    assert successful.drain_delivery_results() == []

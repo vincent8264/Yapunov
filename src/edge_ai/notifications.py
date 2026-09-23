@@ -83,9 +83,14 @@ def render_notification_message(alert: AlertNotification) -> NotificationMessage
 
 class Notifier(ABC):
     channel: str = "notification"
+    # When True, notify() only queues the alert; results come from drain_delivery_results().
+    delivers_later: bool = False
 
     @abstractmethod
     def notify(self, alert: AlertNotification) -> None: ...
+
+    def drain_delivery_results(self) -> list[tuple[AlertNotification, bool]]:
+        return []
 
     def close(self) -> None:
         pass
@@ -136,6 +141,7 @@ class AsyncNotifier(Notifier):
     """Keep network delays and failures off the local safety-alert path."""
 
     _STOP: Final = object()
+    delivers_later = True
 
     def __init__(
         self,
@@ -154,6 +160,7 @@ class AsyncNotifier(Notifier):
         self.errors: list[str] = []
         self.dropped = 0
         self._queue: queue.Queue[AlertNotification | object] = queue.Queue(queue_size)
+        self._results: queue.SimpleQueue[tuple[AlertNotification, bool]] = queue.SimpleQueue()
         self._thread = threading.Thread(target=self._run, daemon=True, name="alert-notifier")
         self._thread.start()
 
@@ -162,7 +169,16 @@ class AsyncNotifier(Notifier):
             self._queue.put_nowait(alert)
         except queue.Full:
             self.dropped += 1
+            self._results.put((alert, False))
             self._report(f"notification dropped: event={alert.event} reason=queue-full")
+
+    def drain_delivery_results(self) -> list[tuple[AlertNotification, bool]]:
+        results = []
+        while True:
+            try:
+                results.append(self._results.get_nowait())
+            except queue.Empty:
+                return results
 
     def _report(self, message: str) -> None:
         if self.reporter is not None:
@@ -175,12 +191,14 @@ class AsyncNotifier(Notifier):
                 return
             try:
                 self.delegate.notify(alert)  # type: ignore[arg-type]
+                self._results.put((alert, True))  # type: ignore[arg-type]
                 self._report(
                     f"notification delivered: channel={self.channel} event={alert.event}"
                 )
             except Exception as exc:
                 detail = f"{type(exc).__name__}: {exc}"
                 self.errors.append(detail)
+                self._results.put((alert, False))  # type: ignore[arg-type]
                 self._report(
                     f"notification failed: channel={self.channel} event={alert.event} "
                     f"error={detail}"
@@ -215,6 +233,7 @@ class NotifyingHardware(HardwareBackend):
         self.local_timezone = local_timezone
         self.clock = clock
         self.last_notification_error: str | None = None
+        self._displayed_alert: AlertNotification | None = None
 
     def check_connection(self) -> None:
         self.hardware.check_connection()
@@ -235,10 +254,26 @@ class NotifyingHardware(HardwareBackend):
         self.hardware.clear_alert()
 
     def show_spectrum(self, columns: tuple[int, ...]) -> None:
+        self._forward_delivery_results()
         self.hardware.show_spectrum(columns)
 
+    def show_notification_status(self, delivered: bool) -> None:
+        self.hardware.show_notification_status(delivered)
+
+    def _forward_delivery_results(self) -> None:
+        # Results for alerts that are no longer on screen must not light the new one.
+        for alert, delivered in self.notifier.drain_delivery_results():
+            if alert is self._displayed_alert:
+                self.hardware.show_notification_status(delivered)
+
     def apply_decision(self, decision: Decision) -> None:
+        self._forward_delivery_results()
         self.hardware.apply_decision(decision)
+        if (
+            self._displayed_alert is not None
+            and (decision.action != "alert" or decision.event != self._displayed_alert.event)
+        ):
+            self._displayed_alert = None
         if decision.notify and decision.event is not None:
             alert = AlertNotification(
                 event=decision.event,
@@ -246,10 +281,14 @@ class NotifyingHardware(HardwareBackend):
                 device_name=self.device_name,
                 timestamp=self.clock(self.local_timezone).isoformat(timespec="seconds"),
             )
+            self._displayed_alert = alert
+            delivered = False
             try:
                 self.notifier.notify(alert)
+                delivered = not self.notifier.delivers_later
             except Exception as exc:
                 self.last_notification_error = f"{type(exc).__name__}: {exc}"
+            self.hardware.show_notification_status(delivered)
 
     def shutdown(self) -> None:
         try:

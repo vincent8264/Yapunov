@@ -53,6 +53,13 @@ class UnoQHardware(HardwareBackend):
             raise RuntimeError(f"UNO Q clear alert returned {response!r}")
         self._alert_active = False
 
+    def show_notification_status(self, delivered: bool) -> None:
+        if not self._alert_active:
+            return
+        response = self._bridge.call("set_email_status", delivered)
+        if response != "ok":
+            raise RuntimeError(f"UNO Q email status returned {response!r}")
+
     def show_spectrum(self, columns: tuple[int, ...]) -> None:
         if len(columns) != 13 or any(
             isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 8
