@@ -235,7 +235,7 @@ def _bundled_model(
         names[model_path.name] = model_path
         include(model_path, Path("models") / model_path.name)
         replacements[model] = f"models/{model_path.name}"
-        if component_type == "yamnet":
+        if component_type in {"yamnet", "transcript_help_yamnet"}:
             class_map = model_path.with_name("yamnet_class_map.csv")
             if not class_map.is_file():
                 raise ValueError(f"YAMNet class map not found: {class_map}")

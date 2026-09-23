@@ -226,6 +226,7 @@ asr_model_dir = "../models/sherpa-onnx-streaming-zipformer-en-2023-06-26"''',
 
     directory = "python/models/sherpa-onnx-streaming-zipformer-en-2023-06-26"
     assert {f"{directory}/{name}" for name in _MODULE.ZIPFORMER_ASSET_NAMES} <= names
+    assert "python/models/yamnet_class_map.csv" in names
     assert packaged["inference"]["asr_model_dir"] == (
         "models/sherpa-onnx-streaming-zipformer-en-2023-06-26"
     )
