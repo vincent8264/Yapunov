@@ -9,10 +9,13 @@ from edge_ai.inference.spectral import SpectralSoundInferenceEngine
 from edge_ai.inputs.audio import (
     ArduinoMicrophoneInput,
     AudioFrame,
+    MicrophoneHealthError,
+    MicrophoneHealthInput,
     MicrophoneInput,
     SimulatedSoundInput,
     WavAudioInput,
 )
+from edge_ai.inputs.base import InputSource
 from edge_ai.preprocessing.audio import (
     SlidingAudioWindow,
     extract_audio_features,
@@ -213,6 +216,187 @@ def test_simulated_audio_exercises_all_demo_classes() -> None:
 def test_audio_frame_rejects_non_finite_samples() -> None:
     with pytest.raises(ValueError, match="finite"):
         AudioFrame(np.array([np.nan], dtype=np.float32), 16_000)
+
+
+class _FrameInput(InputSource):
+    def __init__(self, frames: list[AudioFrame | Exception]) -> None:
+        self.frames = list(frames)
+        self.closed = False
+
+    def read(self) -> AudioFrame:
+        item = self.frames.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_microphone_health_reports_sustained_no_signal() -> None:
+    silent = AudioFrame(np.zeros(4, dtype=np.float32), 4)
+    source = MicrophoneHealthInput(
+        _FrameInput([silent, silent]), failure_seconds=2.0, detect_frozen=False
+    )
+
+    source.read()
+    with pytest.raises(MicrophoneHealthError, match="no signal") as error:
+        source.read()
+
+    assert error.value.reason == "no_signal"
+
+
+def test_microphone_health_resets_silence_timer_when_signal_returns() -> None:
+    silent = AudioFrame(np.zeros(2, dtype=np.float32), 2)
+    signal = AudioFrame(np.array([0.0, 0.01], dtype=np.float32), 2)
+    source = MicrophoneHealthInput(
+        _FrameInput([silent, signal, silent]),
+        failure_seconds=2.0,
+        detect_frozen=False,
+    )
+
+    assert source.read() is silent
+    assert source.read() is signal
+    assert source.read() is silent
+
+
+def test_microphone_health_reports_frozen_capture_buffer() -> None:
+    frozen = AudioFrame(np.array([0.1, -0.1], dtype=np.float32), 2)
+    source = MicrophoneHealthInput(
+        _FrameInput([frozen, frozen, frozen]), failure_seconds=2.0
+    )
+
+    source.read()
+    source.read()
+    with pytest.raises(MicrophoneHealthError, match="identical audio buffer") as error:
+        source.read()
+
+    assert error.value.reason == "frozen_signal"
+
+
+def test_microphone_health_wraps_read_failure_and_closes_source() -> None:
+    delegate = _FrameInput([RuntimeError("device disappeared")])
+    source = MicrophoneHealthInput(delegate)
+
+    with pytest.raises(MicrophoneHealthError, match="device disappeared") as error:
+        source.read()
+    source.close()
+
+    assert error.value.reason == "unavailable"
+    assert delegate.closed is True
+
+
+def test_microphone_health_recovers_when_existing_source_resumes() -> None:
+    recovered_frame = AudioFrame(np.array([0.02, -0.02], dtype=np.float32), 2)
+    delegate = _FrameInput([RuntimeError("device disappeared"), recovered_frame])
+    source = MicrophoneHealthInput(delegate)
+
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+
+    assert source.read() is recovered_frame
+    assert source.take_recovered_reason() == "unavailable"
+    assert delegate.closed is False
+
+
+def test_faulted_app_lab_style_input_does_not_block_in_close() -> None:
+    delegate = _FrameInput([RuntimeError("device disappeared")])
+    source = MicrophoneHealthInput(
+        delegate,
+        source_factory=lambda: delegate,
+        reopen_on_fault=False,
+    )
+
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+    source.close()
+
+    assert delegate.closed is False
+
+
+def test_microphone_health_retries_initial_open_failure() -> None:
+    now = [0.0]
+    recovered_frame = AudioFrame(np.array([0.02, -0.02], dtype=np.float32), 2)
+    recovered = _FrameInput([recovered_frame])
+    factory_calls = 0
+
+    def factory() -> InputSource:
+        nonlocal factory_calls
+        factory_calls += 1
+        return recovered
+
+    source = MicrophoneHealthInput(
+        None,
+        source_factory=factory,
+        initial_error=RuntimeError("microphone is already in use"),
+        retry_interval_seconds=2.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(MicrophoneHealthError, match="already in use"):
+        source.read()
+    assert factory_calls == 0
+
+    now[0] = 2.0
+    assert source.read() is recovered_frame
+    assert source.take_recovered_reason() == "unavailable"
+    assert factory_calls == 1
+
+
+def test_microphone_health_reopens_source_and_reports_recovery() -> None:
+    now = [10.0]
+    failed = _FrameInput([RuntimeError("device disappeared")])
+    recovered_frame = AudioFrame(np.array([0.01, -0.01], dtype=np.float32), 2)
+    recovered = _FrameInput([recovered_frame])
+    factory_calls = 0
+
+    def factory() -> InputSource:
+        nonlocal factory_calls
+        factory_calls += 1
+        return recovered
+
+    source = MicrophoneHealthInput(
+        failed,
+        source_factory=factory,
+        retry_interval_seconds=2.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+    assert factory_calls == 0
+    assert failed.closed is False
+
+    now[0] = 12.0
+    assert source.read() is recovered_frame
+    assert source.take_recovered_reason() == "unavailable"
+    assert source.take_recovered_reason() is None
+    assert factory_calls == 1
+    assert failed.closed is True
+
+
+def test_microphone_health_does_not_recover_while_reopened_input_is_silent() -> None:
+    now = [0.0]
+    silent = AudioFrame(np.zeros(2, dtype=np.float32), 2)
+    signal = AudioFrame(np.array([0.01, -0.01], dtype=np.float32), 2)
+    recovered = _FrameInput([silent, signal])
+    source = MicrophoneHealthInput(
+        _FrameInput([RuntimeError("device disappeared")]),
+        source_factory=lambda: recovered,
+        retry_interval_seconds=1.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+    now[0] = 1.0
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+
+    assert source.read() is signal
+    assert source.take_recovered_reason() == "unavailable"
 
 
 def test_audio_spectrum_separates_bands_and_reassembles_model_window() -> None:
