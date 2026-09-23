@@ -146,11 +146,13 @@ zero-level threshold deliberately avoids guessing the noise floor before measure
 are taken on the event microphone; increase it only after room calibration.
 
 After a runtime fault, the pipeline remains alive and displays a crossed-microphone
-icon. It tries to recreate the microphone input every two seconds. Recovery requires
-a usable nonzero frame; a frozen-input recovery also requires the next frame to
-change. With SMTP notifications enabled, the first fault sends one metadata-only
-warning, the matrix status column lights after delivery, and a later recovery sends
-one follow-up email. Repeated retry failures do not generate duplicate messages.
+icon. On the UNO Q it continues polling the existing App Lab microphone object so
+App Lab's ALSA adapter can perform its own USB hot-plug retries. The desktop input is
+recreated every two seconds instead. Recovery requires a usable nonzero frame; a
+frozen-input recovery also requires the next frame to change. With SMTP notifications
+enabled, the first fault sends one metadata-only warning, the matrix status column
+lights after delivery, and a later recovery sends one follow-up email. Repeated retry
+failures do not generate duplicate messages.
 
 For the physical demo, start with the live spectrum visible, unplug only the USB
 microphone, and leave the UNO Q and powered hub connected. Verify the fault icon and

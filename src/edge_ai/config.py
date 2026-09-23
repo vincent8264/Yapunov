@@ -216,7 +216,12 @@ def _build_input(
                 return source
             return MicrophoneHealthInput(
                 source,
-                source_factory=source_factory,
+                # App Lab's ALSAMicrophone retries a removed USB device internally.
+                # Recreating it from outside can close the stream just as hot-plug
+                # recovery succeeds, so only the desktop sounddevice path reopens.
+                source_factory=(
+                    source_factory if component_type == "microphone" else None
+                ),
                 failure_seconds=health_failure_seconds,
                 silence_threshold=health_silence_threshold,
                 detect_frozen=health_detect_frozen,

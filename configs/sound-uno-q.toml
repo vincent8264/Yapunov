@@ -14,13 +14,13 @@ duration_seconds = 1.0
 # Detect only observations that are unambiguous without room calibration: five
 # seconds of exact digital zeroes or an exactly repeated capture buffer. A fault
 # means "no usable audio," not proof that the microphone hardware itself is broken.
-# While faulted, keep the app alive and try to recreate the input every two seconds.
+# While faulted, keep the app alive and continue polling App Lab's microphone; its
+# ALSA adapter performs the USB hot-plug retries visible in the application log.
 [input.health]
 enabled = true
 failure_seconds = 5.0
 silence_threshold = 0.0
 detect_frozen = true
-retry_interval_seconds = 2.0
 
 [preprocessing]
 type = "audio_waveform"

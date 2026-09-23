@@ -160,6 +160,7 @@ def test_board_microphone_display_uses_twenty_hz_chunks(
     assert configured.pipeline.audio_spectrum.inference_hop_seconds == 0.2
     assert captured["duration_seconds"] == 0.05
     assert isinstance(configured.pipeline.input_source, MicrophoneHealthInput)
+    assert configured.pipeline.input_source.source_factory is None
 
 
 @pytest.mark.parametrize(

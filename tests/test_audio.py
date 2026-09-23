@@ -286,6 +286,19 @@ def test_microphone_health_wraps_read_failure_and_closes_source() -> None:
     assert delegate.closed is True
 
 
+def test_microphone_health_recovers_when_existing_source_resumes() -> None:
+    recovered_frame = AudioFrame(np.array([0.02, -0.02], dtype=np.float32), 2)
+    delegate = _FrameInput([RuntimeError("device disappeared"), recovered_frame])
+    source = MicrophoneHealthInput(delegate)
+
+    with pytest.raises(MicrophoneHealthError):
+        source.read()
+
+    assert source.read() is recovered_frame
+    assert source.take_recovered_reason() == "unavailable"
+    assert delegate.closed is False
+
+
 def test_microphone_health_reopens_source_and_reports_recovery() -> None:
     now = [10.0]
     failed = _FrameInput([RuntimeError("device disappeared")])
