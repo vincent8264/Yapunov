@@ -50,6 +50,8 @@ class NotificationMessage:
     body: str
 
 
+EMAIL_SUBJECT_TAG: Final = "[YAPUNOV]"
+
 _EVENT_COPY: Final[dict[str, tuple[str, str, str]]] = {
     "smoke_alarm": (
         "Urgent: smoke alarm sound detected",
@@ -57,12 +59,12 @@ _EVENT_COPY: Final[dict[str, tuple[str, str, str]]] = {
         "Please check immediately.",
     ),
     "glass_break": (
-        "Alert: possible glass-breaking sound",
+        "Urgent: possible glass-breaking sound",
         "A possible glass-breaking sound was detected",
         "Please check the area.",
     ),
     "fall_thud": (
-        "Alert: possible fall-like impact",
+        "Urgent: possible fall-like impact",
         "A possible fall-like impact was detected",
         "Please contact the resident.",
     ),
@@ -72,12 +74,12 @@ _EVENT_COPY: Final[dict[str, tuple[str, str, str]]] = {
         "Please contact the resident immediately.",
     ),
     "water_leak": (
-        "Warning: possible water leak",
+        "Alert: possible water leak",
         "Dripping or running-water sounds persisted",
         "Please check taps, pipes, and appliances for a leak.",
     ),
     "unattended_cooking": (
-        "Warning: possible unattended cooking",
+        "Alert: possible unattended cooking",
         "Boiling, frying, or kettle-whistle sounds persisted",
         "Please check that the stove is attended.",
     ),
@@ -205,7 +207,7 @@ class SMTPNotifier(Notifier):
     def notify(self, alert: Notification) -> None:
         rendered = render_notification_message(alert)
         message = EmailMessage()
-        message["Subject"] = rendered.subject
+        message["Subject"] = f"{EMAIL_SUBJECT_TAG} {rendered.subject}"
         message["From"] = self.sender
         message["To"] = self.recipient
         message.set_content(rendered.body)

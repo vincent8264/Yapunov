@@ -14,6 +14,7 @@ its token written to ``python/heartbeat-token``.
 """
 
 import argparse
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -164,10 +165,17 @@ def _board_notifications(config_path: Path, password: str | None) -> tuple[str, 
     return "\n".join(lines) + "\n", bundled_password
 
 
-def _board_heartbeat(config_path: Path) -> tuple[str, str] | None:
-    """Return a board ``[heartbeat]`` table and its token, or ``None`` if disabled."""
+def _board_heartbeat(
+    config_path: Path, *, detect_address: Callable[[], str] | None = None
+) -> tuple[str, str] | None:
+    """Return a board ``[heartbeat]`` table and its token, or ``None`` if disabled.
+
+    ``url = "auto"`` is replaced with this computer's current LAN address and the
+    ``[heartbeat_server]`` port, because the packaging computer runs the server.
+    """
     with config_path.open("rb") as file:
-        section = tomllib.load(file).get("heartbeat")
+        document = tomllib.load(file)
+    section = document.get("heartbeat")
     if section is None or (isinstance(section, dict) and section.get("enabled") is False):
         return None
     if not isinstance(section, dict):
@@ -175,6 +183,21 @@ def _board_heartbeat(config_path: Path) -> tuple[str, str] | None:
     url = section.get("url")
     if not isinstance(url, str) or not url:
         raise ValueError(f"[heartbeat].url is required in {config_path}")
+    if url == "auto":
+        from edge_ai.heartbeat import detect_lan_address, heartbeat_url
+
+        server = document.get("heartbeat_server", {})
+        port = server.get("port", 8090) if isinstance(server, dict) else 8090
+        try:
+            address = (detect_address or detect_lan_address)()
+        except OSError as exc:
+            raise ValueError(
+                f"could not detect this computer's LAN address for [heartbeat].url = "
+                f'"auto" ({exc}); connect to the board\'s network or set url explicitly'
+            ) from exc
+        url = heartbeat_url(address, port)
+        section = {**section, "url": url}
+        print(f"Heartbeat URL for the board: {url}")
     if urlsplit(url).hostname in {"localhost", "127.0.0.1", "::1"}:
         raise ValueError(
             "[heartbeat].url points to localhost; on the board, use the heartbeat "

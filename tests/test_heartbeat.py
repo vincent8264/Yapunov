@@ -17,7 +17,11 @@ from edge_ai.config import (
 from edge_ai.decision import decide
 from edge_ai.hardware.mock import MockHardware
 from edge_ai.heartbeat import HeartbeatSender, post_heartbeat
-from edge_ai.heartbeat_server import HeartbeatMonitor, build_heartbeat_server
+from edge_ai.heartbeat_server import (
+    HeartbeatMonitor,
+    build_heartbeat_server,
+    startup_address_report,
+)
 from edge_ai.inference.dummy import DummyInferenceEngine
 from edge_ai.inputs.base import InputSource
 from edge_ai.notifications import HealthNotification, Notifier, render_notification_message
@@ -318,6 +322,53 @@ def test_config_builds_heartbeat_sender_from_token_file(tmp_path: Path) -> None:
     assert heartbeat.device_id == "home-monitor"
     assert heartbeat.interval_seconds == 30.0
     assert heartbeat._token == "file-token"
+
+
+def test_auto_url_targets_local_server_port_for_direct_runs(tmp_path: Path) -> None:
+    (tmp_path / "token.txt").write_text("file-token\n", encoding="utf-8")
+    path = tmp_path / "live.toml"
+    path.write_text(
+        _PIPELINE
+        + _HEARTBEAT.replace('"http://192.0.2.10:8090/heartbeat"', '"auto"')
+        + "[heartbeat_server]\nport = 9001\n",
+        encoding="utf-8",
+    )
+
+    heartbeat = load_config(path).heartbeat
+
+    assert heartbeat is not None
+    assert heartbeat.url == "http://127.0.0.1:9001/heartbeat"
+
+
+def _server_config(host: str, device_url: str) -> HeartbeatServerConfig:
+    return HeartbeatServerConfig(
+        host=host,
+        port=8090,
+        device_id="home-monitor",
+        token="t",
+        missing_after_seconds=30.0,
+        notifier=RecordingNotifier(),
+        device_name="Kitchen",
+        local_timezone=timezone.utc,
+        device_url=device_url,
+    )
+
+
+def test_startup_report_prints_detected_address() -> None:
+    lines = startup_address_report(
+        _server_config("0.0.0.0", "auto"), detect_address=lambda: "172.20.10.3"
+    )
+
+    assert lines == ["Heartbeat watchdog: http://172.20.10.3:8090/heartbeat"]
+
+
+def test_startup_report_warns_when_configured_url_is_stale() -> None:
+    lines = startup_address_report(
+        _server_config("0.0.0.0", "http://192.168.1.230:8090/heartbeat"),
+        detect_address=lambda: "172.20.10.3",
+    )
+
+    assert "uses 192.168.1.230, but this computer is now 172.20.10.3" in lines[1]
 
 
 def test_config_without_heartbeat_section_has_no_sender(tmp_path: Path) -> None:

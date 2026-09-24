@@ -14,6 +14,7 @@ from typing import Final
 from urllib.parse import urlsplit
 
 from edge_ai.config import HeartbeatServerConfig, load_heartbeat_server_config
+from edge_ai.heartbeat import AUTO_URL, detect_lan_address, heartbeat_url
 from edge_ai.notifications import HealthNotification, Notifier
 
 _MAX_BODY_BYTES: Final = 1024
@@ -195,6 +196,33 @@ def build_heartbeat_server(
     )
 
 
+def startup_address_report(
+    configured: HeartbeatServerConfig,
+    *,
+    detect_address: Callable[[], str] = detect_lan_address,
+) -> list[str]:
+    """Describe where the device should send heartbeats and flag a stale ZIP address."""
+    if configured.host not in {"0.0.0.0", "::"}:
+        return [f"Heartbeat watchdog: {heartbeat_url(configured.host, configured.port)}"]
+    try:
+        address = detect_address()
+    except OSError as exc:
+        return [
+            f"Heartbeat watchdog: {heartbeat_url('<server-ip>', configured.port)}",
+            f"warning: could not detect this computer's LAN address ({exc})",
+        ]
+    lines = [f"Heartbeat watchdog: {heartbeat_url(address, configured.port)}"]
+    if configured.device_url != AUTO_URL:
+        configured_host = urlsplit(configured.device_url).hostname
+        if configured_host != address:
+            lines.append(
+                f"warning: [heartbeat].url uses {configured_host}, but this computer is "
+                f"now {address}. Set url = \"auto\" or update it, then rebuild and "
+                "reimport the App Lab ZIP."
+            )
+    return lines
+
+
 def run_heartbeat_server(config_path: Path, *, emit: Callable[[str], None] = print) -> None:
     configured = load_heartbeat_server_config(config_path)
     monitor = HeartbeatMonitor(
@@ -216,8 +244,8 @@ def run_heartbeat_server(config_path: Path, *, emit: Callable[[str], None] = pri
         name="heartbeat-watch",
     )
     watcher.start()
-    display_host = configured.host if configured.host not in {"0.0.0.0", "::"} else "<server-ip>"
-    emit(f"Heartbeat watchdog: http://{display_host}:{configured.port}/heartbeat")
+    for line in startup_address_report(configured):
+        emit(line)
     emit(
         f"Emailing if device {configured.device_id!r} is silent for "
         f"{configured.missing_after_seconds:.0f} s. Press Ctrl+C to stop."

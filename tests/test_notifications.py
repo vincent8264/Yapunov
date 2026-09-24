@@ -138,10 +138,10 @@ def test_risk_warning_messages_use_cautious_copy() -> None:
         )
     )
 
-    assert water.subject == "Warning: possible water leak at Kitchen"
+    assert water.subject == "Alert: possible water leak at Kitchen"
     assert "Pattern: detected for 7 s of the last 15 s (strongest sound: Drip)" in water.body
     assert "does not confirm an emergency" in water.body
-    assert cooking.subject == "Warning: possible unattended cooking at Kitchen"
+    assert cooking.subject == "Alert: possible unattended cooking at Kitchen"
     assert "stove is attended" in cooking.body
     assert "Pattern:" not in cooking.body
 
@@ -300,9 +300,9 @@ def test_fixed_messages_use_cautious_event_specific_copy() -> None:
         )
     )
 
-    assert "possible glass" in glass.subject.lower()
+    assert glass.subject.startswith("Urgent: possible glass")
     assert "does not confirm an emergency" in glass.body
-    assert "possible fall" in fall.subject.lower()
+    assert fall.subject.startswith("Urgent: possible fall")
     assert "contact the resident" in fall.body
     assert smoke.subject.startswith("Urgent:")
     assert "check immediately" in smoke.body
@@ -415,7 +415,9 @@ def test_smtp_notifier_sends_rendered_metadata_only_email(
 
     assert len(sent) == 1
     message = sent[0]
-    assert "possible fall-like impact" in str(message["Subject"]).lower()
+    assert str(message["Subject"]) == (
+        "[YAPUNOV] Urgent: possible fall-like impact at Living room"
+    )
     assert str(message["To"]) == "family@example.com, neighbor@example.com"
     assert "88.0%" in message.get_content()
     assert "no audio left the device" in message.get_content()

@@ -244,6 +244,41 @@ def test_email_zip_bundles_heartbeat_token_outside_config(
     assert "heartbeat_server" not in board
 
 
+def test_auto_heartbeat_url_uses_detected_address_and_server_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEST_HEARTBEAT_TOKEN", "heartbeat-secret")
+    private = tmp_path / "private.toml"
+    private.write_text(
+        _PRIVATE_CONFIG
+        + _PRIVATE_HEARTBEAT.replace('"http://192.0.2.10:8090/heartbeat"', '"auto"')
+        + "port = 9001\n",
+        encoding="utf-8",
+    )
+
+    table, _ = _MODULE._board_heartbeat(private, detect_address=lambda: "172.20.10.3")
+
+    assert tomllib.loads(table)["heartbeat"]["url"] == "http://172.20.10.3:9001/heartbeat"
+
+
+def test_auto_heartbeat_url_reports_missing_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEST_HEARTBEAT_TOKEN", "heartbeat-secret")
+    private = tmp_path / "private.toml"
+    private.write_text(
+        _PRIVATE_CONFIG
+        + _PRIVATE_HEARTBEAT.replace('"http://192.0.2.10:8090/heartbeat"', '"auto"'),
+        encoding="utf-8",
+    )
+
+    def offline() -> str:
+        raise OSError("network is unreachable")
+
+    with pytest.raises(ValueError, match="could not detect"):
+        _MODULE._board_heartbeat(private, detect_address=offline)
+
+
 def test_heartbeat_zip_rejects_localhost_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
