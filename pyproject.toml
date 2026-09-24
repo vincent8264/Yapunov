@@ -1,7 +1,7 @@
 [project]
-name = "edge-ai-hackathon-starter"
+name = "private-local-sound-alerts"
 version = "0.1.0"
-description = "Hardware-free Edge AI starter architecture for the Arduino UNO Q"
+description = "Local sound event alerts for the Arduino UNO Q, with a hardware-free demo"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

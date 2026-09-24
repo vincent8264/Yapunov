@@ -1,4 +1,5 @@
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -26,7 +27,9 @@ def test_notification_preferences_round_trip_without_secrets(tmp_path: Path) -> 
     assert load_notification_preferences(path) == preferences
     document = json.loads(path.read_text(encoding="utf-8"))
     assert set(document) == {"version", "recipient", "device_name", "timezone", "enabled"}
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    # The UNO Q runs Linux; Windows reports different mode bits for its ACLs.
+    if os.name == "posix":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 @pytest.mark.parametrize(

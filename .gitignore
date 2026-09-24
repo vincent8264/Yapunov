@@ -9,6 +9,8 @@ __pycache__/
 Thumbs.db
 /.idea/
 /dist/
+/runs/
+/keyword-test/
 /configs/private-live.toml
 /configs/private.live.toml
 /data/notification-settings.json

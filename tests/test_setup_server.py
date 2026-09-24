@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import os
 from pathlib import Path
 
 import pytest
@@ -118,7 +119,9 @@ def test_persistent_setup_pin_is_reused_and_owner_only(tmp_path: Path) -> None:
 
     assert first == second
     assert first.isdigit() and len(first) == 6
-    assert path.stat().st_mode & 0o777 == 0o600
+    # The UNO Q runs Linux; Windows reports different mode bits for its ACLs.
+    if os.name == "posix":
+        assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_configured_background_server_starts_and_stops(

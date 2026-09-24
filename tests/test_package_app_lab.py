@@ -49,7 +49,7 @@ def test_app_lab_zip_contains_pipeline(tmp_path: Path) -> None:
     assert "sketch/sketch.yaml" in names
     assert "python/smtp-password" not in names
     assert board_config["notifications"]["type"] == "none"
-    assert "ports:\n  - 8080" in manifest
+    assert "ports:\n  - 8080" in "\n".join(manifest.splitlines())
 
 
 def test_email_zip_bundles_password_file_outside_config(tmp_path: Path) -> None:

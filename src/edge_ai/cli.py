@@ -1,4 +1,4 @@
-"""Command-line entry point for the Edge AI starter."""
+"""Command-line entry point for Private Local Sound Alerts."""
 
 import argparse
 from datetime import datetime

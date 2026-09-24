@@ -1,8 +1,8 @@
 # AI Agent Guide
 
-This repository prepares for a challenge that remains unknown until the hackathon
-begins. Keep changes reusable, small, hardware-free to test, and easy to replace once
-the actual problem and supplied components are known.
+This repository preserves a completed hackathon prototype as a portfolio project.
+Keep changes small, hardware-free to test, and explicit about what has and has not
+been validated on the physical UNO Q.
 
 ## Architecture
 
@@ -12,7 +12,7 @@ Preserve the core flow:
 Input -> Preprocessing -> Inference -> Decision -> Hardware
 ```
 
-Add challenge-specific behavior as an adapter or decision function instead of
+Add sound-specific behavior as an adapter or decision function instead of
 embedding it in the runner. Laptop development must continue to work with simulated
 input and `MockHardware`.
 
@@ -41,7 +41,7 @@ must not require network access after dependencies and models are installed.
 - Keep machine-specific experiments untracked. Use an `.example.toml` only when users
   must supply private settings or an optional model that is not part of the repository.
 - Keep component factories explicit in `src/edge_ai/config.py`. Do not build a dynamic
-  plugin system unless the challenge clearly needs one.
+  plugin system without a concrete use case.
 - Fail at startup with useful messages for missing sections, unsupported types, bad
   ranges, missing models, and incompatible settings.
 - Resolve referenced paths relative to the configuration file.
@@ -60,7 +60,8 @@ must not require network access after dependencies and models are installed.
 - Keep actuator diagnostics opt-in. Add checks only after verifying wiring, voltage,
   pin assignments, and mechanical travel; always restore switchable outputs to safe
   values.
-- Use only event-supplied hardware, apart from the permitted laptop and USB-C cable.
+- Document the exact board, microphone, wiring, and software versions used for any
+  new physical validation.
 
 ## Models and data
 
@@ -76,7 +77,6 @@ Cover happy paths, invalid configuration, boundaries, unavailable inputs, cleanu
 and mocked hardware calls. Do not weaken a test without documenting the intended
 behavior change.
 
-The Hackaday.io page is part of the judged deliverable. Record design reasoning,
-failed attempts, wiring changes, measurements, and limitations as the project evolves.
-The final page needs at least three useful build logs, five genuine build/final photos,
-and three uploadable project files. Never fabricate build evidence.
+Preserve historical build logs as contemporaneous records. For new work, record
+design reasoning, failed attempts, wiring changes, measurements, and limitations.
+Never fabricate physical validation or build evidence.

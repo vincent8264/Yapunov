@@ -1,5 +1,9 @@
 # Build log 02: shared-audio help keyword scheduler
 
+This log records the scheduler stage of the project. A local `help-kws.onnx`
+prototype was trained later; its held-out results are in
+[models/README.md](../../models/README.md#local-help-keyword-prototype).
+
 We added the software boundary for a local spoken `help` detector while keeping the
 existing environmental sound classifier. One microphone stream now feeds a rolling
 one-second waveform. A small scheduler evaluates the keyword model every 200 ms and

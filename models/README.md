@@ -1,6 +1,6 @@
 # Models
 
-Place hackathon ONNX models in this directory. Model binaries are git-ignored.
+Place local ONNX models in this directory. Model binaries are git-ignored.
 
 For every selected model, record:
 
@@ -61,7 +61,7 @@ The runner prints both `label` (the project event or `background`, which drives 
 alert policy) and `model_label`/`model_confidence` (the highest raw model result).
 The latter is diagnostic only and never triggers hardware or notifications by itself.
 
-Before the field demo, validate genuine MOVO USB-M1 recordings at different ranges,
+Before relying on live alerts, validate genuine MOVO USB-M1 recordings at different ranges,
 ordinary household noise, television playback, dishes, doors, dropped objects, and
 other confusing negatives. Record per-class precision/recall, a confusion matrix,
 representative UNO Q latency, and the final threshold values here.
@@ -78,7 +78,7 @@ The learned classifier is trained by this repository; its synthetic Piper traini
 speech and LibriSpeech examples are recreated using [the data instructions](../data/README.md).
 No separately licensed third-party keyword checkpoint is included.
 
-- Local filename: `help-kws.onnx`; current local SHA-256:
+- Local filename: `help-kws.onnx`; recorded SHA-256 of the evaluated prototype:
   `6f878423237416b5005bdfb4fe52ee8c1385ae458d8ded33cc701d078c4c058f`.
 - Input: rank-1 `float32` tensor `waveform`, one second of mono 16 kHz PCM in
   `[-1, 1]`. YAMNet's log-mel frontend is part of the graph.
@@ -100,7 +100,7 @@ uv run python scripts/train_help_kws.py \
   --yamnet models/yamnet.onnx --output models/help-kws.onnx
 ```
 
-The current held-out LibriSpeech `test-clean` result at threshold `0.62` is 6 true
+The recorded held-out LibriSpeech `test-clean` result at threshold `0.62` is 6 true
 positives, 21 false positives, 39 true negatives, and 9 false negatives across 75
 utterances (precision 0.222, recall 0.400, accuracy 0.600). This is an honest
 prototype result, not a safety-ready detector. The test utterances contain the word

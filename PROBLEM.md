@@ -1,4 +1,7 @@
-# Team 6
+# Original hackathon brief (Team 6)
+
+This file preserves the prompt and event notes that motivated the project. See
+[README.md](README.md) for the implemented system and its documented limits.
 
 ## Challenge
 Sound Classification quietly solves a problem that a lot of families worry about: how do you know when an emergency is happening without a camera watching your every move?
@@ -12,8 +15,3 @@ Arudino Uno Q
 MOVO USB-M1 mic
 8x8 LED array
 
-## Judging rubric 
-in email from ewna
-
-## Deadline 
-2 pm 9/23, every team needs a 10 min presentation. Keep everything on hackaday page

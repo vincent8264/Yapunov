@@ -125,15 +125,19 @@ def _handler_for(
             if urlsplit(self.path).path != "/heartbeat":
                 self._send(404, b"not found\n")
                 return
-            if not hmac.compare_digest(
-                self.headers.get("Authorization", ""), expected_authorization
-            ):
-                self._send(401, b"invalid token\n")
-                return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = 0
+            if not hmac.compare_digest(
+                self.headers.get("Authorization", ""), expected_authorization
+            ):
+                # Consume a bounded request body before replying. Otherwise closing
+                # the socket with unread POST data can reset the 401 on Windows.
+                if 0 < length <= _MAX_BODY_BYTES:
+                    self.rfile.read(length)
+                self._send(401, b"invalid token\n")
+                return
             if length <= 0 or length > _MAX_BODY_BYTES:
                 self._send(413, b"invalid body size\n")
                 return
